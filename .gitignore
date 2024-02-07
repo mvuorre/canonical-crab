@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto
+
+/.quarto/
+/cache/
+/index_*/
+/manuscript/
+*.pdf
+*.html
+*.docx

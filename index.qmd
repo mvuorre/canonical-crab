@@ -1,0 +1,220 @@
+---
+title: Computational Notebook
+subtitle: 'Supplementary analyses to *“The smoke-detector principle of pathogen avoidance: A test of how the behavioral immune system gives rise to prejudice”*'
+authors:
+  - name: Matti Vuorre
+    email: mjvuorre@uvt.nl
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    affiliation:
+      - ref: 1
+    corresponding: yes
+affiliations:
+  - id: 1
+    name: Tilburg University
+execute:
+  cache: true
+format: 
+  docx: 
+    number-sections: false
+    fig-align: center
+    dpi: 220
+  html:
+    toc: true
+    code-fold: true
+    self-contained: true
+---
+
+```{r}
+#| label: setup-document
+#| include: false
+#| cache: false
+
+knitr::opts_chunk$set(
+  echo = knitr::is_html_output(),
+  dpi = 220,
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+
+```{r}
+#| label: setup
+#| message: false
+#| cache: false
+
+# Packages
+library(scales)
+library(ggbeeswarm)
+library(faux)
+library(pwr)
+library(broom)
+library(corrr)
+library(distributional)
+library(tidyverse)
+
+# Plots
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank())
+  )
+
+# Environment
+dir.create("cache", FALSE) # Temporary files
+```
+
+## Analysis strategy
+
+We test the hypothesis that bias toward false alarms when detecting contagious individuals positively predicts prejudice toward groups with a superficial anomaly in appearance. Prejudice is measured with separate "feeling thermometers" for 12 different targets, of which we consider four to be most important.
+
+Our main analysis is a regression model of prejudice (P) on participant sex (S) and decision criterion (C) in the sickness detection task. P is measured on a 0-1 visual analogue scale, and we assume it is normally distributed conditional on the model. S is treated as a binary factor (male / female) and entered into the regression with contrast codes (f: -0.5, m: 0.5). C is a SDT metric that theoretically varies without bound but is typically in the -3 to 3 range. For all participants j we model prejudice as
+
+$$
+P_j \sim \text{Normal}
+  \left(\beta_0 + \beta_1S_j + \beta_2C_j, \sigma^2 \right)
+$$
+
+We will estimate this regression separately for all 12 feeling thermometers.
+
+## Sample size planning
+
+Here we examine statistical power for a single prejudice thermometer assuming the following:
+
+- Minimum effect size of interest is r = 0.1 between C and P
+- P and S correlate at r = 0.2 (conservative estimate from prior data)
+- S and C correlate at r = 0.2 (conservative assumption)
+
+We first define a function that simulates data from this multivariate normal distribution, and then calculates the critical regression coefficient's p-value.
+
+```{r}
+# Functions to simulate data and calculate coefficient p-value
+simulate <- function(
+    n = 30, 
+    cor_prejudice_sex = 0, 
+    cor_prejudice_criterion = 0, 
+    cor_sex_criterion = 0
+) {
+  
+  # Simulate from multivariate normal distribution
+  latent <- rnorm_multi(
+    n = n, 
+    mu = c(0, 0, 0),
+    sd = c(1, 1, 1),
+    r = c(cor_prejudice_sex, cor_prejudice_criterion, cor_sex_criterion), 
+    varnames = c("prejudice", "sex", "criterion"),
+    empirical = FALSE
+  )
+  
+  # Categorize latent terms
+  observed <- latent |> 
+    mutate(
+      sex = norm2binom(x = sex, size = 1, prob = pnorm(sex)),
+      sex = factor(sex, levels = 0:1, labels = c("Female", "Male"))
+    )
+  
+  contrasts(observed$sex) <- c(-0.5, 0.5)
+  
+  # Fit model
+  fit <- lm(prejudice ~ sex + criterion, data = observed)
+  # Calculate one-sided pvalue from tvalue
+  tvalue <- summary(fit)$coefficients["criterion", "t value"]
+  pvalue <- pt(tvalue, fit$df, lower.tail = FALSE)
+  pvalue
+}
+```
+
+We then run this over a grid of assumptions
+
+```{r}
+# Find power for a set of parameters
+path <- "cache/sim-1.rds"
+if (!file.exists(path)) {
+  library(furrr)
+  plan(multisession, workers = 8)
+
+  sim <- crossing(
+    n = seq(500, 2000, by = 100),
+    cor_prejudice_sex = c(0, 0.1, 0.2),
+    cor_prejudice_criterion = 0.1,
+    cor_sex_criterion = c(0, 0.1, 0.2),
+    i = 1:1000
+  ) |> 
+    mutate(
+      simulation = future_pmap_dbl(
+        list(n, cor_prejudice_sex, cor_prejudice_criterion, cor_sex_criterion), 
+        ~simulate(
+          n=..1, 
+          cor_prejudice_sex=..2, 
+          cor_prejudice_criterion=..3, 
+          cor_sex_criterion=..4
+        )
+      )
+    )
+  sim <- sim |>   
+    summarise(
+      simulation = mean(simulation <= 0.05),
+      .by = c(n, cor_prejudice_sex, cor_prejudice_criterion, cor_sex_criterion)
+    )
+  saveRDS(sim, path)
+} else {sim <- readRDS(path)}
+```
+
+Calculate simple power
+
+```{r}
+sim <- sim |> 
+  mutate(
+    calculation = map2_dbl(
+      n, cor_prejudice_criterion, 
+      ~pwr.r.test(n=..1, r=..2, alternative = "greater")$power
+    )
+  )
+```
+
+
+And then plot the results
+
+```{r}
+#| label: fig-power
+#| fig-cap: Probability of rejecting the null hypothesis over a range of sample sizes and correlations. Theoretical power refers to power where the variables do not correlate; actual power to where the variables do correlate.
+
+sim |> 
+  pivot_longer(c(simulation, calculation)) |> 
+  mutate(
+    `Cor(S, C)` = number(cor_sex_criterion, .01),
+    `Cor(S, P)` = number(cor_prejudice_sex, .01)
+  ) |> 
+  ggplot(aes(n, value, col = name)) +
+  scale_color_brewer(
+    "Power",
+    palette = "Set1",
+    breaks = c("calculation", "simulation"),
+    labels = c("Theoretical\n(analytic)", "Actual\n(simulated)")
+  ) +
+  scale_y_continuous(
+    "Power",
+    labels = ~percent(.)
+  ) +
+  scale_x_continuous(
+    "Number of participants",
+    breaks = extended_breaks()
+  ) +
+  geom_hline(
+    yintercept = 0.9, linewidth = 0.1
+  ) +
+  geom_line() +
+  facet_grid(
+    `Cor(S, C)` ~ `Cor(S, P)`, 
+    labeller = label_both
+  ) +
+  guides(
+    color = guide_legend(override.aes = list(linewidth = 1))
+  ) +
+  theme(
+    legend.text = element_text(margin = unit(rep(4, 4), "pt")),
+    legend.position = "bottom"
+  )
+```
+
+The minimum number of participants needed here to get 90% power is about `r min(sim$n[sim$simulation > 0.9 & sim$cor_prejudice_sex == 0.2 & sim$cor_sex_criterion == 0.2])`.
