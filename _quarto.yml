@@ -1,2 +1,13 @@
 project:
   title: "canonical-crab"
+authors:
+  - name: Matti Vuorre
+    email: mjvuorre@uvt.nl
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    affiliation:
+      - ref: 1
+    corresponding: yes
+affiliations:
+  - id: 1
+    name: Tilburg University

@@ -1,17 +1,6 @@
 ---
-title: Computational Notebook
-subtitle: 'Supplementary analyses to *“The smoke-detector principle of pathogen avoidance: A test of how the behavioral immune system gives rise to prejudice”*'
-authors:
-  - name: Matti Vuorre
-    email: mjvuorre@uvt.nl
-    url: https://vuorre.com
-    orcid: 0000-0001-5052-066X
-    affiliation:
-      - ref: 1
-    corresponding: yes
-affiliations:
-  - id: 1
-    name: Tilburg University
+title: 'The smoke-detector principle of pathogen avoidance: A test of how the behavioral immune system gives rise to prejudice'
+subtitle: Supplementary analyses
 execute:
   cache: true
 format: 
