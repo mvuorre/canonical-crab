@@ -4,14 +4,14 @@ subtitle: Supplementary analyses
 execute:
   cache: true
 format: 
-  docx: 
-    number-sections: false
-    fig-align: center
-    dpi: 220
   html:
     toc: true
     code-fold: true
     self-contained: true
+  docx: 
+    number-sections: false
+    fig-align: center
+    dpi: 220
 ---
 
 ```{r}
@@ -22,10 +22,14 @@ format:
 knitr::opts_chunk$set(
   dpi = 220,
   fig.width = 7,
-  fig.height = 5
+  fig.height = 5,
+  message = FALSE,
+  echo = knitr::is_html_output()
+)
+options(
+  digits = 2
 )
 ```
-
 
 ```{r}
 #| label: setup
@@ -35,6 +39,11 @@ knitr::opts_chunk$set(
 # Packages
 library(scales)
 library(faux)
+library(knitr)
+library(readxl)
+library(haven)
+library(marginaleffects)
+library(janitor)
 library(pwr)
 library(broom)
 library(corrr)
@@ -43,15 +52,15 @@ library(tidyverse)
 
 # Plots
 theme_set(
-  theme_minimal(base_size = 12) +
+  theme_linedraw(base_size = 12) +
     theme(panel.grid = element_blank())
-  )
+)
 
 # Environment
 dir.create("cache", FALSE) # Temporary files
 ```
 
-## Analysis strategy
+# Analysis strategy
 
 We test the hypothesis that bias toward false alarms when detecting contagious individuals positively predicts prejudice toward groups with a superficial anomaly in appearance. Prejudice is measured with separate "feeling thermometers" for 12 different targets, of which we consider four to be most important.
 
@@ -59,7 +68,7 @@ Our main analysis is a regression model of prejudice (P) on participant sex (S) 
 
 $$
 P_j \sim \text{Normal}
-  \left(\beta_0 + \beta_1S_j + \beta_2C_j, \sigma^2 \right)
+\left(\beta_0 + \beta_1S_j + \beta_2C_j, \sigma^2 \right)
 $$
 
 We will estimate this regression separately for all 12 feeling thermometers.
@@ -119,7 +128,7 @@ path <- "cache/sim-1.rds"
 if (!file.exists(path)) {
   library(furrr)
   plan(multisession, workers = 8)
-
+  
   sim <- crossing(
     n = seq(500, 2000, by = 100),
     cor_prejudice_sex = c(0, 0.1, 0.2),
@@ -158,7 +167,6 @@ sim <- sim |>
     )
   )
 ```
-
 
 And then plot the results
 
@@ -205,3 +213,348 @@ sim |>
 ```
 
 The minimum number of participants needed here to get 90% power is about `r min(sim$n[sim$simulation > 0.9 & sim$cor_prejudice_sex == 0.2 & sim$cor_sex_criterion == 0.2])`.
+
+# Results
+
+```{r}
+#| label: data-qualtrics-wrangle
+#| output: false
+
+# Load data with good names
+# Qualtrics SPSS output is most informative and therefore used here
+dat <- read_spss(Sys.getenv("PATH_QUALTRICS_SPSS")) |>
+  clean_names() |> 
+  rename(pid = response_id) |> 
+  filter(consent == 1)
+
+# Count exclusions
+s <- list()
+s$total_before_exclusions <- nrow(dat)
+s$not_english <- nrow(dat[dat$language != 1, ])
+s$not_us <- nrow(dat[dat$residence != 1, ])
+s$not_18 <- nrow(dat[dat$age < 18, ])
+s$not_attention <- nrow(dat[dat$attention_check != 3, ])
+
+# Apply exclusion criteria
+dat <- dat |>
+  filter(
+    consent == 1,
+    language == 1,
+    residence == 1,
+    age >= 18,
+    # attention_check == 4
+  )
+s$total_after_exclusions <- nrow(dat)
+
+# Remove unnecessary variables
+dat <- dat |> 
+  select(
+    -c(start_date:q50, consent, language, residence, attention_check), 
+    pid
+  )
+
+# Create SDT metrics
+
+## Load mapping between stimulus and target type from file
+mapping <- map(
+  c("sick_v1", "sick_v2", "criminal"), 
+  ~read_excel("data-raw/mapping.xlsx", sheet = .x) |> 
+    mutate(task = .x, .before = 1)
+) |> 
+  bind_rows() |> 
+  clean_names()
+
+## Wrangle data to appropriate format for subsequent calculations
+sdt <- dat |> 
+  select(pid, contains("_sick_"), contains("criminal")) |>
+  pivot_longer(-pid, values_to = "response") |> 
+  # This drops all items with missing response
+  # including those in task (v1, v2) that participant was not assigned to
+  drop_na(response) |> 
+  separate(name, c("image_url", "task"), sep = "_", extra = "merge") |> 
+  # Match item names here to "Image URL"s in mapping.xlsx
+  mutate(image_url = str_c("URL ", str_remove(image_url, "a"))) |> 
+  # Join to URL-target mapping data
+  left_join(mapping) |> 
+  # Task v1 / v2 no longer needed
+  mutate(task = str_remove(task, "_v[0-9]"))
+
+## Take SDT task data out of main data
+dat <- dat |> 
+  select(-contains("_sick_"), -contains("criminal"))
+
+## Exclude individuals with 5 or more missing disease task responses
+sdt <- sdt |> 
+  filter(task == "sick") |> 
+  count(pid, task) |> 
+  filter(n >= 9) |> 
+  distinct(pid) |> 
+  left_join(sdt)
+
+## Recode and harmonize response and target values
+## Task is to detect sick or criminal, code responses to No / Yes
+sdt <- sdt |> 
+  mutate(
+    response = factor(response, levels = c(2, 1), labels = c("No", "Yes")),
+    target = factor(
+      condition_type_of_target %in% c("sick", "criminal"),
+      levels = c(FALSE, TRUE),
+      labels = c("No", "Yes")
+    )
+  )
+## Verify calculation here
+count(sdt, condition_type_of_target, target)
+sdt <- select(sdt, -condition_type_of_target)
+
+## Calculate SDT metrics (1: Trial outcome)
+sdt <- sdt |> 
+  mutate(
+    type = "hit",
+    type = ifelse(target == "Yes" & response == "No", "miss", type),
+    type = ifelse(target == "No" & response == "No", "cr", type),
+    type = ifelse(target == "No" & response == "Yes", "fa", type)
+  )
+count(sdt, target, response, type)
+
+## Calculate SDT metrics (2: z scores and parameters)
+sdt <- sdt |> 
+  summarise(
+    n = n(),
+    .by = c(pid, task, type)
+  ) |> 
+  pivot_wider(names_from = type, values_from = n) |> 
+  mutate(
+    zhr = qnorm(hit / (hit + miss)),
+    zfa = qnorm(fa / (fa + cr)),
+    dprime = zhr - zfa,
+    crit = -(zhr + zfa) / 2
+  )
+
+# Scale scores; lines indicate "clusters" 1 - 4
+groups <- c(
+  "obese", "elder", "limbs", "mark", 
+  "tb", "prison", 
+  "gay", "lesb", "home", "addict", "immig", 
+  "polit", "lawyer"
+)
+
+## Rescale all scale items
+scl <- dat |> 
+  select(pid, obese1:pds7) |> 
+  mutate(
+    # Rescale all variables from 1-7 to 0-1
+    across(-pid, ~(.x - 1) / 6),
+    # Reverse code positive items group prejudice (1, 2, 4, 5)
+    across(
+      unlist(map(groups, ~paste0(.x, c(1, 2, 4, 5)))),
+      ~1 - .x
+    )
+  )
+
+## Calculate means over items
+scl <- scl |> 
+  pivot_longer(-pid) |> 
+  separate(name, c("scale", "item"), sep = -1) |> 
+  summarise(value = mean(value, na.rm = TRUE), .by = c(pid, scale)) |> 
+  pivot_wider(names_from = scale, values_from = value)
+
+## Take out scales from main data
+dat <- dat |> 
+  select(-c(obese1:pds7))
+
+# Join tables 
+dat <- sdt |> 
+  pivot_wider(names_from = task, values_from = cr:crit) |> 
+  left_join(scl, by = "pid") |> 
+  left_join(dat, by = "pid")
+
+# Code remaining variables
+dat <- dat |> 
+  mutate(gender = as_factor(gender))
+# We were going to code female: -0.5, male 0.5 to center on grand mean,
+# but data has four gender categories so we use the equivalent "ANOVA" coding
+# to center on the grand mean instead
+library(faux)
+dat$gender <- contr_code_anova(dat$gender)
+
+## Group membership
+dat_membership <- select(dat, starts_with("member"))
+dat <- select(dat, -starts_with("member"))
+names(dat_membership) <- paste0("m_", groups)
+# Recode responses Yes: 1, No (and everything else) (0)
+dat_membership <- dat_membership |> 
+  mutate(
+    across(everything(), ~ifelse(.x==1, 1, NaN) |> replace_na(0))
+  )
+dat <- bind_cols(dat, dat_membership)
+rm(dat_membership)
+
+# Gender breakdown
+genders <- dat |> 
+  count(gender) |> 
+  mutate(gender = fct_na_value_to_level(gender, "Missing")) |> 
+  arrange(desc(n)) |> 
+  mutate(gender = str_glue("{gender}: {n}")) |> 
+  pull(gender) |> 
+  str_to_sentence()
+```
+
+## Descriptive results
+
+After excluding `{r} s$total_before_exclusions - s$total_after_exclusions` individuals who did not satisfy the inclusion criteria, the final sample consisted of `{r} s$total_after_exclusions` individuals whose median age was `{r} number(median(dat$age))` years (range: [`{r} paste(range(dat$age), collapse = ", ")`]), with the following self-reported gender breakdown `{r} paste0(genders, collapse = ", ")`. We summarize our key variables in @tbl-descriptives, and their correlations in @tbl-descriptives-cor.
+
+```{r}
+#| label: tbl-descriptives
+#| tbl-cap: Descriptives of key variables.
+
+tbl_sum <- dat |> 
+  select(
+    crit_sick, crit_criminal,
+    all_of(groups), pds, age
+  ) |> 
+  pivot_longer(everything()) 
+
+tbl_sum |>
+  zap_labels() |> 
+  summarise(
+    m = mean(value, na.rm = TRUE),
+    s = sd(value, na.rm = TRUE),
+    min = min(value, na.rm = TRUE),
+    max = max(value, na.rm = TRUE),
+    .by = name
+  ) |> 
+  setNames(c("Variable", "Mean", "SD", "Min", "Max")) |> 
+  kable()
+```
+
+```{r}
+#| label: tbl-descriptives-cor
+#| tbl-cap: Correlation matrix of key variables.
+
+dat |> 
+  select(
+    crit_sick, crit_criminal,
+    all_of(groups), pds, age
+  ) |> 
+  correlate() |> 
+  shave() |> 
+  fashion() |> 
+  kable()
+```
+
+## Hypothesis tests
+
+We then turned to our main hypothesis test (H1): We regressed all thirteen groups' prejudice scores on decision criteria from the sickness detection task, and report the key regression parameters in @tbl-h1.
+
+```{r}
+#| label: tbl-h1
+#| tbl-cap: Results from regressions of prejudice scores on contagion task decision criteria.
+
+# Do all regressions
+tbl_fit <- tibble(
+  group = groups,
+  # Analysis 1
+  fit_base = map(
+    group, 
+    ~lm(str_glue("{.x} ~ crit_sick + gender"), data = dat)
+  ),
+  fit_sex = map(
+    group, 
+    ~lm(str_glue("{.x} ~ crit_sick * gender"), data = dat)
+  ),
+  # Analysis 2
+  # Models without people not members in that category
+  fit_mem = map(
+    group,
+    ~lm(
+      str_glue("{.x} ~ crit_sick + gender"), 
+      data = filter(dat, get(paste0("m_", .x)) != 1)
+    )
+  ),
+  fit_mem_sex = map(
+    group,
+    ~lm(
+      str_glue("{.x} ~ crit_sick * gender"), 
+      data = filter(dat, get(paste0("m_", .x)) != 1)
+    )
+  ),
+  # Analysis 3
+  # Adjusting for Ccriminal
+  fit_crim = map(
+    group, 
+    ~lm(str_glue("{.x} ~ crit_sick + gender + crit_criminal"), data = dat)
+  ),
+  fit_crim_sex = map(
+    group, 
+    ~lm(str_glue("{.x} ~ crit_sick * gender + crit_criminal"), data = dat)
+  ),
+)
+```
+
+Everything below here will change as data comes in (model selection etc.) For example...
+
+```{r}
+
+# Summarise regressions
+tbl_hyp <- tbl_fit |> 
+  pivot_longer(-group, names_to = "model") |> 
+  mutate(model = str_remove(model, "fit_")) |> 
+  mutate(
+    sum = map(
+      value, 
+      ~tidy(.x, conf.int = TRUE) |> 
+        # One-sided p smaller than zero is (one minus) p / 2
+        mutate(
+          p.smaller = ifelse(
+            sign(statistic) == -1, 
+            p.value / 2, 
+            1 - p.value / 2)
+        )
+    )
+  ) |> 
+  select(-value) |> 
+  unnest(sum)
+
+# Or slopes by sex
+avg_slopes(tbl_fit$fit_sex[[1]], variables = "crit_sick", by = "gender")
+
+# Some kind of table
+tbl_hyp |> 
+  filter(model == "base", term == "crit_sick") |> 
+  mutate(
+    across(c(where(is.numeric), -p.smaller), ~number(.x, .01)),
+    Estimate = str_glue("{estimate} ({std.error}) [{conf.low}, {conf.high}]"),
+    p.smaller = pvalue(p.smaller, add_p = TRUE)
+  ) |> 
+  select(group, term, Estimate, p.smaller) |> 
+  kable()
+```
+
+```{r}
+#| label: fig-regression
+#| fig-cap: Scatterplots and regression lines (with 95%CIs) for each prejudice scale on signal detection criteria in the contagion detection task.
+
+# Some kind of figure
+dat |> 
+  select(pid, crit_sick, all_of(groups)) |> 
+  pivot_longer(all_of(groups)) |> 
+  mutate(name = factor(name, levels = groups)) |> 
+  ggplot(aes(crit_sick, value)) +
+  coord_cartesian(
+    ylim = 0:1
+  ) +
+  scale_x_continuous(
+    "Criterion [contagiousness]"
+  ) +
+  geom_point(shape = 1) +
+  geom_smooth(
+    method = "lm",
+    linewidth = 0.5,
+    color = "black"
+  ) +
+  facet_wrap("name") +
+  theme(
+    axis.title.y = element_blank()
+  )
+```
+

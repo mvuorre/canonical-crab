@@ -4,6 +4,7 @@
 .httr-oauth
 .DS_Store
 .quarto
+.Renviron
 
 /.quarto/
 /cache/
@@ -12,3 +13,5 @@
 *.pdf
 *.html
 *.docx
+/data-raw/
+/data/
