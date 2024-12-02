@@ -24,6 +24,7 @@ knitr::opts_chunk$set(
   fig.width = 7,
   fig.height = 5,
   message = FALSE,
+  warning = FALSE,
   echo = knitr::is_html_output()
 )
 options(
@@ -412,7 +413,7 @@ tbl_sum <- dat |>
     crit_sick, crit_criminal,
     all_of(groups), pds, age
   ) |> 
-  pivot_longer(everything()) 
+  pivot_longer(everything(), names_to = "Variable") 
 
 tbl_sum |>
   zap_labels() |> 
@@ -421,9 +422,14 @@ tbl_sum |>
     s = sd(value, na.rm = TRUE),
     min = min(value, na.rm = TRUE),
     max = max(value, na.rm = TRUE),
-    .by = name
+    .by = Variable
   ) |> 
-  setNames(c("Variable", "Mean", "SD", "Min", "Max")) |> 
+  mutate(
+    across(where(is.numeric), ~number(.x, .01)),
+    `Mean (SD)` = str_glue("{m} ({s})"),
+    Range = str_glue("[{min}, {max}]")
+  ) |> 
+  select(Variable, `Mean (SD)`, Range) |> 
   kable()
 ```
 
