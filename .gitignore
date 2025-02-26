@@ -7,7 +7,7 @@
 .Renviron
 
 /.quarto/
-/cache/
+/*cache/
 /index_*/
 /manuscript/
 *.pdf
@@ -15,3 +15,5 @@
 *.docx
 /data-raw/
 /data/
+/docs/
+/tinytable_assets/

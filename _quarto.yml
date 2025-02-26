@@ -1,5 +1,17 @@
 project:
   title: "canonical-crab"
+  output-dir: docs
+  render:
+    - index.qmd
+
+date: 2025-02-24
+
+format:
+  html:
+    code-fold: true
+    toc: true
+  docx: default
+
 authors:
   - name: Matti Vuorre
     email: mjvuorre@uvt.nl
@@ -8,6 +20,16 @@ authors:
     affiliation:
       - ref: 1
     corresponding: yes
+  - name: Florian van Leeuwen
+  - name: Bastian Jaeger
+  - name: John Axelsson
+  - name: D. Vaughn Becker
+  - name: Lina S. Hansson
+  - name: Julie Lasselin
+  - name: Mats Lekander
+  - name: Joshua M. Tybur
 affiliations:
   - id: 1
     name: Tilburg University
+
+bibliography: bibliography.bib

@@ -1,1 +1,4 @@
-PATH_QUALTRICS_SPSS="data-raw/qualtrics.sav"
+PATH_DATA_RAW="data-raw/data.xlsx"
+MAX_CORES = 8
+BRMS_BACKEND = "cmdstanr"
+BRMS_THREADS = 2
