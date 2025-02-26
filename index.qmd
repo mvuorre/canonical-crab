@@ -156,8 +156,11 @@ dat <- read_excel(
   select(
     -c(
       start_date:recorded_date,
-      distribution_channel, user_language,
-      consent, q50, comments
+      distribution_channel,
+      user_language,
+      consent,
+      q50,
+      comments
     )
   )
 
@@ -253,11 +256,6 @@ sdt <- sdt |>
     .after = 1
   )
 
-dat_acc <- sdt |>
-  summarise(accuracy = sum(accuracy) / n(), .by = c(pid, task))
-
-t.test(filter(dat_acc, task == "sick")$accuracy)
-
 ## Calculate SDT metrics (1: Trial outcome)
 sdt <- sdt |>
   mutate(
@@ -266,8 +264,11 @@ sdt <- sdt |>
     type = ifelse(truth == "No" & response == "No", "cr", type),
     type = ifelse(truth == "No" & response == "Yes", "fa", type)
   )
-count(sdt, truth, response, type) |>
-  mutate(p = percent(n / sum(n)))
+
+## For later analysis
+sdt_raw <- sdt
+dat_acc <- sdt |>
+  summarise(accuracy = sum(accuracy) / n(), .by = c(pid, task))
 
 ## Calculate SDT metrics (2: z scores and parameters)
 ## Note: we omit the negative sign: negative values of *c* indicate a bias toward responding "No"
@@ -393,7 +394,7 @@ genders <- dat |>
   str_to_sentence()
 
 ## Remove temporary tables
-rm(dat_membership, dat_acc, scl, sdt, sdt_code)
+rm(dat_membership, scl, sdt_code)
 
 # Save cleaned data
 write_csv(dat, "data/data.csv")
@@ -701,48 +702,107 @@ Those with a more liberal bias toward responding "sick" in the infectious diseas
 
 ### Disgust sensitivity
 
-We then estimated pairwise Pearson correlations between signal detection parameters from the infectious disease detection task, prejudice, and pathogen disgust sensitivity. We report these results in @fig-pds.
+```{r}
+#| label: tbl-pds
+#| tbl-cap: Regression coefficients indicating relations between pathogen disgust sensitivity and SDT parameters (first two rows) and prejudice.
+
+fit_pds1 <- lm(pds ~ crit_sick + dprime_sick + gender + age, data = dat) |>
+  tidy(conf.int = TRUE) |>
+  filter(str_detect(term, "_sick")) |>
+  mutate(group = "pds", .before = 1)
+
+fit_pds2 <- tibble(
+  group = groups,
+  fit = map(
+    group,
+    ~lm(str_glue("{.x} ~ pds + gender + age"), data = dat) |>
+      tidy(conf.int = TRUE) |>
+      filter(term == "pds")
+  )
+) |> unnest(fit)
+bind_rows(
+  fit_pds1, fit_pds2
+) |>
+  mutate(
+    p = pvalue(p.value, add_p = TRUE),
+    across(where(is.numeric), ~number(.x, .01)),
+    est = str_glue(
+      "{estimate} ({std.error}) [{conf.low}, {conf.high}] ({p})"
+      )
+  ) |>
+  select(outcome = group, term, Estimate = est) |>
+  .tt() |>
+  group_tt(
+    i = c(
+      rep("Pathogen disgust sensitivity", 2), "Prejudice"
+      )
+    ) |>
+  style_tt(
+    i = c(1, 4), bold = TRUE
+  )
+```
+
+We then examined relations between pathogen disgust sensitivity, bias and sensitivity in the infectious disease detection task, and prejudice. We regressed PDS on c, d', gender, and age; and in separate models all target groups' prejudice on pds, gender, and age. We report these results in @tbl-pds.
+
+### Detection task performance
+
+We then report task performance and SDT parameters in detail from both tasks. Results in @fig-sdt.
 
 ```{r}
-#| label: fig-pds
-#| fig-cap: "Correlations between pathogen disgust sensitivity and SDT parameters & prejudice scores."
-#| fig-height: 2.8
-#| fig-width: 3.8
+#| label: tbl-sdt
+#| tbl-cap: Detection task parameters' means and bootstrapped 95%CIs.
 
-dat |>
-  select(pid, crit_sick, dprime_sick, any_of(groups), pds) |>
-  correlation(p_adjust = "none") |>
-  filter(Parameter2 == "pds") |>
-  mutate(
-    Parameter1 = factor(
-      Parameter1,
-      c(groups, "crit_sick", "dprime_sick")
-    ) |>
-      fct_rev(),
-    sig = p <= 0.05
+library(Hmisc)
+sdt <- left_join(sdt, dat_acc)
+
+sdt |>
+  select(task, hr, fr, dprime, crit, accuracy) |>
+  pivot_longer(c(hr:accuracy), names_to = "variable") |>
+  summarise(
+    c = mean_cl_boot(value),
+    .by = c(task, variable)
   ) |>
-  tibble() |>
-  ggplot(aes(r, Parameter1)) +
-  scale_x_continuous(
-    "Pearson r [95%CI]"
-  ) +
-  scale_shape_manual(
-    values = c("FALSE" = "circle filled", "TRUE" = "circle")
-  ) +
-  geom_vline(
-    xintercept = 0,
-    linetype = 2,
-    linewidth = 0.25
+  unpack(c) |>
+  mutate(
+    across(where(is.numeric), ~ number(.x, .01)),
+    Estimate = str_glue("{y} [{ymin}, {ymax}]"),
+  ) |>
+  select(-c(y, ymin, ymax)) |>
+  pivot_wider(names_from = task, values_from = Estimate) |>
+  .tt()
+```
+
+We also examined the item functioning of the stimuli in the two dection tasks by calculating the percentages correct for each stimulus. These results are shown in @fig-sdt.
+
+```{r}
+#| label: fig-sdt
+#| fig-cap: Percentages correct for all stimuli in the infectious disease detection (left) and criminal (right) detection tasks. Error bars are 95%CIs.
+#| fig-height: 3.2
+
+sdt_raw |>
+  summarise(
+    cor = sum(accuracy), n = n(),
+    b = setNames(binconf(cor, n, return.df = TRUE), c("p", "l", "u")),
+    .by = c(task, stim)
+  ) |>
+  unpack(b) |>
+  arrange(task, p) |>
+  mutate(stim = fct_inorder(stim)) |>
+  ggplot(aes(stim, p)) +
+  xlab("Stimulus") +
+  scale_y_continuous(
+    "% correct",
+    limits = c(0, 1),
+    labels = percent
   ) +
   geom_pointrange(
-    aes(xmin = CI_low, xmax = CI_high, shape = sig),
-    fill = "white",
-    linewidth = .5,
-    fatten = 3
+    aes(ymin = l, ymax = u),
+    linewidth = .25, fatten = 2
   ) +
-  guides(shape = "none") +
+  facet_manual("task", design = "AAABB", scales = "free_x") +
   theme(
-    axis.title.y = element_blank()
+    # axis.ticks.x = element_blank(),
+    axis.text.x = element_blank()
   )
 ```
 
