@@ -99,11 +99,11 @@ dir.create("cache", FALSE) # Temporary files
 
 # Table of coefficients from test [t1, t2, t3, t4]
 tbl_coef <- function(
-  data = dat_fit,
-  test = NULL,
-  cols = gender, # gender [t1-3] | hypothesis [t4]
-  p = p.value.nonsup # one-sided or p.value for t4
-) {
+    data = dat_fit,
+    test = NULL,
+    cols = gender, # gender [t1-3] | hypothesis [t4]
+    p = p.value.nonsup # one-sided or p.value for t4
+    ) {
   data |>
     select(group, {{ test }}) |>
     unnest({{ test }}) |>
@@ -192,14 +192,18 @@ dat <- dat |>
   )
 s$missing <- nrow(dat[dat$missing > 0, ])
 
+# We also remove individuals who didn't respond 'Man' or 'Woman'
+# to better align with Stage 1 RR
+s$not_mw <- nrow(dat[dat$gender %in% 3:4, ])
+
 # Apply exclusion criteria
-# todo: Enable for real data
 dat <- dat |>
   filter(
     attention_check == 4,
     language == 1,
     residence == 1,
-    missing < 5
+    missing < 5,
+    gender %in% 1:2
   )
 s$total_after_exclusions <- nrow(dat)
 
@@ -357,24 +361,13 @@ dat <- dat |>
   select(pid, everything())
 
 # Recode remaining variables
-# We were going to code female: -0.5, male 0.5 to center on grand mean,
-# but data has four gender categories
-# We collapse smallest binary gender
+# We code female: -0.5, male: 0.5 (note dropped non-men/women response above)
 dat <- dat |>
   mutate(
     gender = factor(
       gender,
-      levels = 1:4,
-      labels = c("Man", "Woman", "Other", "Prefer not to say")
-    )
-  )
-# Lump less frequent levels to min_n(male, female)
-dat <- dat |>
-  mutate(
-    gender = fct_lump_n(
-      gender,
-      n = 1,
-      other_level = levels(fct_infreq(dat$gender))[2]
+      levels = 1:2,
+      labels = c("Man", "Woman")
     )
   )
 
@@ -392,8 +385,6 @@ dat <- bind_cols(dat, dat_membership)
 # Gender breakdown
 genders <- dat |>
   count(gender) |>
-  mutate(gender = fct_na_value_to_level(gender, "Missing")) |>
-  arrange(desc(n)) |>
   mutate(gender = str_glue("{gender}: {n}")) |>
   pull(gender) |>
   str_to_sentence()
@@ -404,7 +395,7 @@ write_csv(dat, "data/data.csv")
 
 ## Descriptive results
 
-After excluding `{r} s$total_before_exclusions - s$total_after_exclusions` individuals who did not satisfy the inclusion criteria (`{r} s$not_attention` failed the attention check; `{r} s$not_english` reported a non-English first language; `{r} s$not_us` were not based in the US; `{r} s$missing` had more than 5 missing values in the disease detection task), the final sample consisted of `{r} s$total_after_exclusions` individuals with the following self-reported gender breakdown: `{r} paste0(genders, collapse = ", ")` (we collapsed "Other" and "Prefer not to say" to the latter because our Stage 1 RR treated sex as a binary variable). We summarize the study's key variables in @tbl-desc, and their correlations in @tbl-cor. We conducted all analyses in R and used the marginaleffects package for testing slopes and their contrasts, and tidyverse for data cleaning and visualization [@r2024; @me2024; @tidyverse2019].
+After excluding `{r} s$total_before_exclusions - s$total_after_exclusions` individuals who did not satisfy the inclusion criteria (`{r} s$not_attention` failed the attention check; `{r} s$not_english` reported a non-English first language; `{r} s$not_us` were not based in the US; `{r} s$missing` had more than 5 missing values in the disease detection task), and `{r} s$not_mw` individuals who reported a gender other than 'Man' or 'Woman', the final sample consisted of `{r} s$total_after_exclusions` individuals with the following self-reported gender breakdown: `{r} paste0(genders, collapse = ", ")`. We summarize the study's key variables in @tbl-desc, and their correlations in @tbl-cor. We conducted all analyses in R and used the marginaleffects package for testing slopes and their contrasts, and tidyverse for data cleaning and visualization [@r2024; @me2024; @tidyverse2019].
 
 ```{r}
 #| label: tbl-desc
