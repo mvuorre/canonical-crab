@@ -140,7 +140,7 @@ tbl_coef <- function(
 # Results
 
 ```{r}
-#| label: data-qualtrics-wrangle
+#| label: data-wrangle
 #| output: false
 
 # Load data with good names
@@ -215,7 +215,11 @@ dat <- dat |>
 ## Correct responses
 sdt_code <- codebook |>
   filter(str_detect(variable_name, "sick|criminal")) |>
-  select(name = variable_name, correct_response) |>
+  select(
+    name = variable_name,
+    correct_response,
+    ssd_id = more_comments
+  ) |>
   mutate(name = str_c("x", name))
 
 ## Separate table for SDT tasks
@@ -394,9 +398,6 @@ genders <- dat |>
   pull(gender) |>
   str_to_sentence()
 
-## Remove temporary tables
-rm(dat_membership, sdt_code)
-
 # Save cleaned data
 write_csv(dat, "data/data.csv")
 ```
@@ -442,6 +443,8 @@ Notably, @tbl-cor shows that the decision criteria for the two detection tasks w
 
 dat |>
   select(
+    d_sick = dprime_sick,
+    d_crim = dprime_criminal,
     c_sick = crit_sick,
     c_crim = crit_criminal,
     all_of(groups[1:4]),
@@ -460,11 +463,11 @@ dat |>
     align = "l",
     fontsize = 0.75
   ) |>
-    style_tt(
-      i = "notes",
-      align = "l",
-      fontsize = 0.75
-    )
+  style_tt(
+    i = "notes",
+    align = "l",
+    fontsize = 0.75
+  )
 ```
 
 ## Hypothesis tests
@@ -600,6 +603,9 @@ dat_fit <- dat_fit |>
         .x,
         df = .x$df.residual,
         hypothesis = c(
+          c_sick = "crit_sick = 0",
+          c_crim = "crit_criminal = 0",
+          gender = "gender = 0",
           `c_sick - gender` = "crit_sick - gender = 0",
           `c_sick - c_crim` = "crit_sick - crit_criminal = 0"
         )
@@ -630,6 +636,8 @@ dat_fit |>
   select(group, t1:t4) |>
   pivot_longer(-group) |>
   unnest(value) |>
+  # Take out coefficients from t4
+  filter(!(name == "t4" & !str_detect(hypothesis, "-"))) |>
   mutate(
     term = if_else(!is.na(term), "Slope", "Contrast"),
     name = if_else(!is.na(hypothesis), hypothesis, name) |>
@@ -733,30 +741,34 @@ fit_pds2 <- tibble(
   group = groups,
   fit = map(
     group,
-    ~lm(str_glue("{.x} ~ pds + gender + age"), data = dat) |>
+    ~ lm(str_glue("{.x} ~ pds + gender + age"), data = dat) |>
       tidy(conf.int = TRUE) |>
       filter(term == "pds")
   )
-) |> unnest(fit)
+) |>
+  unnest(fit)
 bind_rows(
-  fit_pds1, fit_pds2
+  fit_pds1,
+  fit_pds2
 ) |>
   mutate(
     p = pvalue(p.value, add_p = TRUE),
-    across(where(is.numeric), ~number(.x, .01)),
+    across(where(is.numeric), ~ number(.x, .01)),
     est = str_glue(
       "{estimate} ({std.error}) [{conf.low}, {conf.high}] ({p})"
-      )
+    )
   ) |>
   select(outcome = group, term, Estimate = est) |>
   .tt() |>
   group_tt(
     i = c(
-      rep("Pathogen disgust sensitivity", 2), "Prejudice"
-      )
-    ) |>
+      rep("Pathogen disgust sensitivity", 2),
+      "Prejudice"
+    )
+  ) |>
   style_tt(
-    i = c(1, 4), bold = TRUE
+    i = c(1, 4),
+    bold = TRUE
   )
 ```
 
@@ -801,34 +813,124 @@ We also examined the item functioning of the stimuli in the two dection tasks by
 
 ```{r}
 #| label: fig-sdt
-#| fig-cap: Percentages correct for all stimuli in the infectious disease detection (left) and criminal (right) detection tasks. Error bars are 95%CIs.
+#| fig-cap: "Percentages correct for all stimuli in the infectious disease detection (left) and criminal (right) detection tasks. Red: Not sick / not criminal; green: Sick / criminal. Error bars are 95%CIs."
 #| fig-height: 3.2
 
 sdt_raw |>
   summarise(
-    cor = sum(accuracy), n = n(),
+    cor = sum(accuracy),
+    n = n(),
     b = setNames(binconf(cor, n, return.df = TRUE), c("p", "l", "u")),
-    .by = c(task, stim)
+    .by = c(task, stim, truth)
   ) |>
   unpack(b) |>
-  arrange(task, p) |>
-  mutate(stim = fct_inorder(stim)) |>
-  ggplot(aes(stim, p)) +
-  xlab("Stimulus") +
+  separate(stim, c("n", "t", "v"), remove = FALSE) |>
+  mutate(diff = abs(p[1] - p[2]), .by = c(n, t)) |>
+  mutate(
+    stim = fct_reorder(stim, p, .fun = mean),
+    stim2 = interaction(t, n) |> fct_reorder(p, .fun = mean)
+  ) |>
+  arrange(task, stim2) |>
+  ggplot(aes(stim2, p, color = truth)) +
+  scale_color_brewer(
+    "True status",
+    palette = "Dark2",
+    direction = -1
+  ) +
+  scale_x_discrete(
+    "Stimulus",
+    labels = ~ str_extract(.x, "[0-9]+")
+  ) +
   scale_y_continuous(
     "% correct",
     limits = c(0, 1),
+    expand = expansion(0.01),
     labels = percent
   ) +
   geom_pointrange(
     aes(ymin = l, ymax = u),
-    linewidth = .25, fatten = 2
+    position = position_dodge(.4),
+    linewidth = .5,
+    fatten = 1.5
   ) +
   facet_manual("task", design = "AAABB", scales = "free_x") +
   theme(
-    # axis.ticks.x = element_blank(),
-    axis.text.x = element_blank()
+    legend.position = "none",
+    panel.grid.major.x = element_line()
   )
+```
+
+We then compared the hit and false alarm rates for each stimuli in our study to those in a prior study using the same stimuli; by and large these were very similar (@fig-sdt-compare).
+
+```{r}
+#| label: fig-sdt-compare
+#| fig-cap: "Comparison of item functioning in current study (red) and a previous study (blue). Top row: Proportions of 'Yes' responses in both conditions and studies. Bottom: Same as above but illustrating the correlation as a scatterplot."
+#| fig-height: 2.6
+
+brks <- c(0, .25, .5, .75, 1)
+lbls <- c("0", ".25", ".50", ".75", "1")
+# Compare response=yes rates to data from prior publication
+tmp <- sdt_raw |>
+  filter(task == "sick") |>
+  count(ssd_id, truth, response) |>
+  pivot_wider(names_from = response, values_from = n) |>
+  mutate(Current = Yes / (No + Yes)) |>
+  left_join(
+    rename(read_csv("data-raw/stim-stats.csv"), Previous = response_yes)
+  ) |>
+  select(ssd_id, truth, Current, Previous) |>
+  mutate(
+    ssd_id = fct_reorder(ssd_id, Previous),
+    truth = factor(
+      truth,
+      levels = c("No", "Yes"),
+      labels = c("Sick", "Healthy")
+    )
+  )
+
+pa <- tmp |>
+  pivot_longer(Current:Previous) |>
+  ggplot(aes(value, ssd_id, col = name)) +
+  scale_color_brewer(
+    "Study",
+    palette = "Set1"
+  ) +
+  scale_y_discrete(
+    "Stimulus",
+    labels = ~ str_extract(.x, "([0-9]|[1-9][0-9])$")
+  ) +
+  scale_x_continuous(
+    "p(response='Yes')",
+    limits = c(0, 1),
+    breaks = brks,
+    labels = lbls
+  ) +
+  geom_point() +
+  facet_wrap("truth") +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 7),
+    aspect.ratio = 1
+  )
+
+pb <- tmp |>
+  mutate(id = str_extract(ssd_id, "([0-9]|[1-9][0-9])$")) |>
+  ggplot(aes(Previous, Current)) +
+  geom_abline(linewidth = 0.25, color = "grey50") +
+  geom_text(aes(label = id), size = 2.4) +
+  scale_x_continuous(
+    limits = c(0, 1),
+    breaks = brks,
+    labels = lbls
+  ) +
+  coord_cartesian(ylim = 0:1) +
+  facet_wrap("truth") +
+  theme(
+    aspect.ratio = 1,
+    panel.grid = element_blank()
+  )
+
+(pa | pb)
 ```
 
 ### Hypothesis test
@@ -1057,7 +1159,7 @@ pb <- fits |>
 ```{r}
 x <- fits_coef |>
   filter(Star == "*") |>
-  mutate(across(where(is.numeric), ~number(.x, .01))) |>
+  mutate(across(where(is.numeric), ~ number(.x, .01))) |>
   str_glue_data(
     "{Estimate} [{CI.Lower}, {CI.Upper}]",
   ) |>
@@ -1097,7 +1199,7 @@ tbl_coef(test = t3)
 
 ```{r}
 #| label: tbl-t4
-#| tbl-cap: Contrasts for hypothesis tests (analysis 4).
+#| tbl-cap: Coefficients and contrasts for hypothesis tests (analysis 4).
 #| cache: false
 
 tbl_coef(test = t4, cols = hypothesis, p = p.value)
@@ -1116,13 +1218,12 @@ tibble(
   group = c(groups, "pds"),
   alpha = map_dbl(
     group,
-    ~select(scl_raw, starts_with(.x)) |>
+    ~ select(scl_raw, starts_with(.x)) |>
       cronbachs_alpha()
   )
 ) |>
   pivot_wider(names_from = group, values_from = alpha) |>
   .tt()
-
 ```
 
 Then, because the number of stimuli for our tasks were limited, we calculated how many individuals' hit and false alarm rates had to be corrected. These numbers are shown in the "Nobs=0" (zero hits or false alarms) and "Nobs=7" (all hits or false alarms) columns of @tbl-sdt-counts.
@@ -1142,16 +1243,18 @@ sdt |>
   ) |>
   pivot_wider(
     names_from = value,
-    values_from = n, names_prefix = "Nobs="
+    values_from = n,
+    names_prefix = "Nobs="
   ) |>
   select(-task, Type = name) |>
   .tt() |>
   group_tt(
     i = c(rep("Infectious disease", 2), rep("Criminal", 2))
   ) |>
-    style_tt(
-      i = c(1, 4), bold = TRUE
-    )
+  style_tt(
+    i = c(1, 4),
+    bold = TRUE
+  )
 ```
 
 # Appendix: Sensitivity
