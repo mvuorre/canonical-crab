@@ -99,11 +99,11 @@ dir.create("cache", FALSE) # Temporary files
 
 # Table of coefficients from test [t1, t2, t3, t4]
 tbl_coef <- function(
-    data = dat_fit,
-    test = NULL,
-    cols = gender, # gender [t1-3] | hypothesis [t4]
-    p = p.value.nonsup # one-sided or p.value for t4
-    ) {
+  data = dat_fit,
+  test = NULL,
+  cols = gender, # gender [t1-3] | hypothesis [t4]
+  p = p.value.nonsup # one-sided or p.value for t4
+) {
   data |>
     select(group, {{ test }}) |>
     unnest({{ test }}) |>
@@ -926,9 +926,9 @@ pb <- tmp |>
 
 ### Hypothesis test
 
-We then considered an alternative analytic approach for testing the overall hypothesis that a liberal infectious disease decision criterion is associated with prejudice toward particular social groups. Above, we tested this idea separately for multiple target groups. Here, we model the relationship between *c*~infected~ and prejudice across target groups (omitting "tb" and "prison") in one multilevel model to accomplish three goals: (A) Estimate an average relation between *c*~infected~ and prejudice across target groups; (B) avoid overfitting target-group-specific relations using partial pooling; and (C) evaluate evidence for the null hypothesis that the average relationship between *c*~infected~ and prejudice is zero using a bayes factor approximated with the Savage-Dickey density ratio [@wagenmakersBayesianHypothesisTesting2010].
+We then considered an alternative analytic approach for testing the overall hypothesis that a liberal infectious disease decision criterion is associated with prejudice toward the four key groups (H1). Above, we tested this idea separately for each of the four groups. Here, we model the relationship between *c*~infected~ and prejudice across the four groups in one multilevel model to accomplish three goals: (A) Estimate an average relation between *c*~infected~ and prejudice across the groups; (B) avoid overfitting target-group-specific relations using partial pooling; and (C) evaluate evidence for the null hypothesis that the average relationship between *c*~infected~ and prejudice is zero using a bayes factor approximated with the Savage-Dickey density ratio [@wagenmakersBayesianHypothesisTesting2010].
 
-We modeled the z-scored prejudice rating P for the *i*th participant and *j*th target group with a standard multilevel model specified as
+We modeled the z-scored prejudice score P for the *i*th participant and *j*th target group with a standard multilevel model specified as
 
 $$
 \begin{align}
@@ -946,11 +946,11 @@ $$
   \end{pmatrix}
 \right), \\
 \delta_0 &\sim \operatorname{Normal}(0, \tau_{\delta}), \\
-\beta_1 &\sim \operatorname{Normal}(0, \phi).
+\beta_2 &\sim \operatorname{Normal}(0, \phi).
 \end{align}
 $$
 
-Above, we denote prejudice as P, gender (woman: -0.5, man: 0.5) as G, and *c*~infected~ as C. $\beta_2$ and $\gamma_1$ are the population-level and target-group-specific regression slopes of prejudice on *c*~infected~, respectively. Critically, because we could not determine an exact prediction for the average effect size based on previous work or theory, we estimated the model across a range of priors $\phi \in \{0.1, 0.25, 0.5, 0.75, 1\}$. For the other model parameters, we used the brms' package's default priors [@brms2017; @brms2018].
+Above, we denote prejudice as P, gender (woman: -0.5, man: 0.5) as G, and *c*~infected~ as C. $\beta_2$ and $\gamma_1$ are the population-level and target-group-specific deviations in regression slopes of prejudice on *c*~infected~, respectively. Critically, because we could not determine an exact prediction for the average effect size based on previous work or theory, we estimated the model across a range of priors $\phi \in \{0.1, 0.25, 0.5, 0.75, 1\}$. For the other model parameters, we used the brms' package's default priors [@brms2017; @brms2018].
 
 ```{r}
 #| label: fit-glmm
@@ -967,9 +967,18 @@ options(
 # Reshape data for multilevel model and z-score prejudice scores
 # Don't include tb and prison targets
 dat_b <- dat |>
-  select(pid, gender, age, crit_sick, all_of(groups), -tb, -prison) |>
-  mutate(across(any_of(groups), ~ scale(.) |> as.numeric())) |>
-  pivot_longer(any_of(groups), names_to = "target", values_to = "prejudice")
+  select(pid, gender, age, crit_sick, obese, elder, limbs, mark) |>
+  mutate(
+    across(
+      any_of(groups),
+      ~ scale(.) |> as.numeric()
+    )
+  ) |>
+  pivot_longer(
+    any_of(groups),
+    names_to = "target",
+    values_to = "prejudice"
+  )
 
 # Specify model
 bform <- bf(
@@ -986,10 +995,10 @@ fits <- tibble(
       bform,
       data = dat_b,
       prior = prior_string(.x, class = "b", coef = "crit_sick"),
-      iter = 4000,
-      warmup = 1000,
+      iter = 5000,
+      warmup = 2000,
       file = str_glue("cache/brm-phi-{.y}"),
-      control = list(adapt_delta = 0.95),
+      control = list(adapt_delta = 0.999),
       file_refit = "never",
       sample_prior = "yes"
     )
@@ -1018,16 +1027,18 @@ x <- rope(fits$fixef[[5]]$samples$H1, range = c(-0.1, 0.1))
 x <- percent(x$ROPE_Percentage, .1)
 ```
 
-First, we show the estimated relation between *c*~infected~ and prejudice toward the "average" target group from the multilevel model as a light gray density in @fig-bf. (We show these parameters for $\phi=1$ because the estimates did not meaningfully differ across priors.) The average relation is neglibly small and closely centered on zero (with `{r} x` of the posterior distribution within [-0.1, 0.1]), suggesting that practically meaningfully large average relations are very unlikely.
+First, we show the estimated relation between *c*~infected~ and prejudice toward the average target group from the multilevel model in the bottom row of @fig-bf (left). (We show these parameters for $\phi=1$ because the estimates did not meaningfully differ across priors.) The average relation is neglibly small and closely centered on zero (with `{r} x` of the posterior distribution within [-0.1, 0.1]), suggesting that practically meaningfully large average relations are unlikely.
 
 ```{r}
 #| label: fig-bf
-#| fig-cap: "Results from multilevel model assessing the relationship between Csick and prejudice across target groups. Left: Posterior density of the Csick - prejudice [average] relationship in gray. We shaded this density as darker for |x| > 0.1. Filled points indicate partially pooled target-group-specific estimates from multilevel model. Empty points indicate fixed-effect target-group-specific estimates of the corresponding models discussed in the main text. Note for the models here, we standardized prejudice scores. Right: Evidence ratio favoring the point null over the alternative (relationship is non-null), as a function of the standard deviation of the prior distribution on the average relationship."
-#| fig-height: 2.2
+#| fig-cap: "Results from multilevel model assessing the relationship between C~infected~ and prejudice across target groups. Left: Estimated C~infected~ - prejudice relationships. Filled points indicate partially pooled target-group-specific estimates from multilevel model (with the average shown in the bottom row). Empty points indicate fixed-effect target-group-specific estimates of the corresponding models discussed in the main text. Note for the models here, we standardized prejudice scores. Right: Evidence ratio favoring the point null over the alternative (relationship is non-null), as a function of the standard deviation of the prior distribution on the average relationship."
+#| fig-asp: 0.4
+#| fig-width: 5
+#| out-width: 70%
 
 # Refit stdz FE models
 fits_lm <- tibble(
-  Group = groups[!(groups %in% c("tb", "prison"))],
+  Group = c("obese", "elder", "limbs", "mark"),
   lm = map(
     Group,
     ~ tidy(
@@ -1038,101 +1049,68 @@ fits_lm <- tibble(
       conf.int = TRUE
     ) |>
       filter(term == "crit_sick") |>
-      select(lm.e = estimate, lm.cl = conf.low, lm.ul = conf.high)
+      select(Estimate = estimate, CI.Lower = conf.low, CI.Upper = conf.high)
   )
 ) |>
-  unnest(lm)
+  unnest(lm) |>
+  mutate(model = "Fixed")
 
-# Wrangle, order, give y-coords
-fits_lm <- fits_lm |>
-  arrange(lm.e) |>
-  mutate(
-    lm.g = fct_inorder(Group),
-    lm.y = (as.numeric(lm.g) - 5.5) / 200
-  )
+# Join different kinds of coefficients
 fits_coef <- fits |>
   filter(phi == "1.00") |>
   select(coef) |>
-  unnest(coef) |>
-  arrange(Estimate) |>
-  mutate(
-    coef.g = fct_inorder(Group),
-    coef.y = .25 + (as.numeric(coef.g) - 5.5) / 200
-  ) |>
-  left_join(fits_lm)
+  unnest(coef)
 fits_fixef <- fits |>
   filter(phi == "1.00") |>
   select(fixef) |>
-  mutate(fixef = map(fixef, ~ .x$samples)) |>
-  unnest(fixef)
+  mutate(fixef = map(fixef, ~ .x$hypothesis)) |>
+  unnest(fixef) |>
+  mutate(Group = "Average")
 
-pa <- fits_coef |>
+# Plot coefficients
+pa <- bind_rows(
+  fits_coef,
+  fits_fixef
+) |>
+  mutate(model = "Pooled") |>
+  bind_rows(fits_lm) |>
   ggplot() +
-  scale_y_continuous(
-    breaks = c(0, .3),
-    labels = c("Fixed", "Pooled"),
-    expand = expansion(c(.001, .025))
-  ) +
+  aes(x = Estimate, y = Group, fill = model) +
   scale_x_continuous(
     "Estimate",
     expand = expansion(.1)
   ) +
   scale_fill_manual(
-    values = c("gray25", "gray75"),
-    aesthetics = c("slab_fill")
+    values = c("white", "black")
   ) +
   geom_vline(
     xintercept = 0,
     color = "gray70",
     linewidth = 0.25
   ) +
-  stat_slab(
-    data = fits_fixef,
-    height = .15,
-    slab_alpha = 0.75,
-    slab_linewidth = 0.25,
-    slab_color = "black",
-    .width = c(.8, .95),
-    aes(x = H1, y = .3, slab_fill = after_stat(between(x, -0.1, 0.1)))
-  ) +
-  geom_segment(
-    aes(x = Estimate, xend = lm.e, y = coef.y, yend = lm.y),
-    linewidth = .25,
-    color = "gray70"
-  ) +
   geom_pointrange(
     aes(
-      x = Estimate,
       xmin = CI.Lower,
-      xmax = CI.Upper,
-      y = coef.y,
-      group = coef.g
+      xmax = CI.Upper
     ),
-    position = position_dodge(.1),
-    fatten = 2.25,
-    linewidth = .175
-  ) +
-  geom_pointrange(
-    aes(lm.e, xmin = lm.cl, xmax = lm.ul, y = lm.y, group = lm.g),
-    position = position_dodge(.1),
-    fill = "white",
     shape = 21,
-    fatten = 2.5,
-    linewidth = .175,
-    stroke = .75
+    linewidth = 0.33,
+    fatten = 3,
+    position = position_dodge(.50)
   ) +
   theme(
     axis.title.y = element_blank(),
     legend.position = "none"
   )
 
+# Plot evidence ratios
 pb <- fits |>
   mutate(fixef = map(fixef, ~ .x$hypothesis)) |>
   select(phi, fixef) |>
   unnest(fixef) |>
   ggplot(aes(phi, Evid.Ratio)) +
   scale_x_discrete(
-    "Prior SD (phi)"
+    "Prior SD"
   ) +
   scale_y_continuous(
     "Evid. Ratio H0/HA",
@@ -1144,7 +1122,7 @@ pb <- fits |>
   ) +
   geom_point()
 
-(pa | pb) + plot_layout(widths = c(7, 3))
+(pa | pb)
 ```
 
 ```{r}
@@ -1158,9 +1136,9 @@ x <- fits_coef |>
 x <- setNames(x, pull(fits_coef |> filter(Star == "*"), Group))
 ```
 
-Second, the filled points and intervals show the partially pooled estimates of $\gamma_1$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). We connected these with vertical lines to illustrate how partial pooling has shrunk the most extreme estimates toward the mean, and subsequently provided more accurate estimates that avoid overfitting. Nevertheless, the partially pooled estimates for gay men ($\gamma_{1gay}$ = `{r} x[["gay"]]`; posterior mean and 95%CI), lesbian women (`{r} x[["lesb"]]`), homeless individuals (`{r} x[["home"]]`), and politicians (`{r} x[["polit"]]`) remained credibly different from zero at the 95% confidence level
+Second, the filled points and intervals show the partially pooled estimates of $\gamma_1$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). Partial pooling has shrunk the most estimates toward their mean, and subsequently provided more accurate estimates that avoid overfitting. Neither the average relation nor the group-specific relations were credibly different from zero at the 95% confidence level.
 
-Third, the right panel of @fig-bf shows the evidence ratio between H0: $\beta_2 = 0$ and HA: $\beta_2 \neq 0$. Across the prior distributions that we considered, the evidence for the null hypothesis ranged from weak to very strong. We note that our numerical approximations to the evidence ratio are necessarily tentative because the prior distribution for $\beta_2$ is underdetermined by current theory but nevertheless take them to indicate moderate evidence against the smoke detector principle.
+Third, the right panel of @fig-bf shows the evidence ratio between H0: $\beta_2 = 0$ and HA: $\beta_2 \neq 0$. Across the prior distributions that we considered, the evidence for the null hypothesis ranged from weak to very strong. We note that our approximations of the evidence ratio are necessarily tentative because the prior distribution for $\beta_2$ is underdetermined by current theory but nevertheless take them to indicate moderate evidence against the smoke detector principle.
 
 # Appendix: Tables
 
