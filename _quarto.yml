@@ -4,8 +4,7 @@ project:
   render:
     - index.qmd
 
-date: 2025-02-24
-
+date: 2025-04-16
 format:
   html:
     code-fold: true
