@@ -36,6 +36,7 @@ library(modelsummary)
 library(tinytable)
 library(patchwork)
 library(ggdist)
+library(ggtext)
 library(broom)
 library(bayestestR)
 library(janitor)
@@ -67,7 +68,7 @@ dir.create("cache", FALSE) # Temporary files
   avg_slopes(
     model,
     variables = "crit_sick",
-    by = "gender",
+    by = "sex",
     # Need to specify df to get a t-test rather than a z test
     df = model$df.residual,
     # For one-sided p.value
@@ -99,11 +100,11 @@ dir.create("cache", FALSE) # Temporary files
 
 # Table of coefficients from test [t1, t2, t3, t4]
 tbl_coef <- function(
-  data = dat_fit,
-  test = NULL,
-  cols = gender, # gender [t1-3] | hypothesis [t4]
-  p = p.value.nonsup # one-sided or p.value for t4
-) {
+    data = dat_fit,
+    test = NULL,
+    cols = sex, # sex [t1-3] | hypothesis [t4]
+    p = p.value.nonsup # one-sided or p.value for t4
+    ) {
   data |>
     select(group, {{ test }}) |>
     unnest({{ test }}) |>
@@ -114,12 +115,18 @@ tbl_coef <- function(
         ~ number(.x, .01)
       ),
       Estimate = str_glue(
-        "{estimate} ({std.error}) [{conf.low}, {conf.high}], ",
+        "{estimate} [{conf.low}, {conf.high}], ",
         "{pvalue(p, add_p = TRUE)}"
       ),
     ) |>
-    select(Target = group, {{ cols }}, Estimate) |>
+    select(
+      Target = group,
+      {{ cols }},
+      Estimate
+    ) |>
     pivot_wider(names_from = {{ cols }}, values_from = Estimate) |>
+    # Don't include in t4
+    select(-any_of("crit_sick")) |>
     .tt(
       notes = list(
         "Numbers indicate point estimate (SE) [95% CI]"
@@ -164,6 +171,9 @@ dat <- read_excel(
     )
   )
 
+# Use 'sex' consistently
+dat <- rename(dat, sex = gender)
+
 # Write reduced data for sharing
 dir.create("data", FALSE)
 write_csv(dat, "data/data-raw.csv")
@@ -194,7 +204,7 @@ s$missing <- nrow(dat[dat$missing > 0, ])
 
 # We also remove individuals who didn't respond 'Man' or 'Woman'
 # to better align with Stage 1 RR
-s$not_mw <- nrow(dat[dat$gender %in% 3:4, ])
+s$not_mw <- nrow(dat[dat$sex %in% 3:4, ])
 
 # Apply exclusion criteria
 dat <- dat |>
@@ -203,7 +213,7 @@ dat <- dat |>
     language == 1,
     residence == 1,
     missing < 5,
-    gender %in% 1:2
+    sex %in% 1:2
   )
 s$total_after_exclusions <- nrow(dat)
 
@@ -279,7 +289,6 @@ dat_acc <- sdt |>
   summarise(accuracy = sum(accuracy) / n(), .by = c(pid, task))
 
 ## Calculate SDT metrics (2: z scores and parameters)
-## Note: we omit the negative sign: negative values of *c* indicate a bias toward responding "No"
 sdt <- sdt |>
   summarise(
     n = n(),
@@ -308,20 +317,37 @@ dat <- dat |>
 
 ## Scale scores
 ## Names of all groups
-groups <- c(
-  "obese",
-  "elder",
-  "limbs",
-  "mark",
-  "tb",
-  "prison",
-  "gay",
-  "lesb",
-  "home",
-  "addict",
-  "immig",
-  "polit",
-  "lawyer"
+groups <- tibble(
+  group = c(
+    "obese",
+    "elder",
+    "limbs",
+    "mark",
+    "tb",
+    "prison",
+    "gay",
+    "lesb",
+    "home",
+    "addict",
+    "immig",
+    "polit",
+    "lawyer"
+  ),
+  label = c(
+    "Obese",
+    "Elderly",
+    "Missing limbs",
+    "Birthmark",
+    "Tuberculosis",
+    "Prisoner",
+    "Gay",
+    "Lesbian",
+    "Homeless",
+    "Addict",
+    "Immigrant",
+    "Politician",
+    "Lawyer"
+  )
 )
 
 ## Rescale all scale items
@@ -332,7 +358,9 @@ scl <- dat |>
     across(-pid, ~ (.x - 1) / 6),
     # Reverse code positive items group prejudice (1, 2, 4, 5)
     across(
-      unlist(map(groups, ~ paste0(.x, c(1, 2, 4, 5)))),
+      unlist(
+        map(groups$group, ~ paste0(.x, c(1, 2, 4, 5)))
+      ),
       ~ 1 - .x
     )
   )
@@ -361,20 +389,21 @@ dat <- dat |>
   select(pid, everything())
 
 # Recode remaining variables
-# We code female: -0.5, male: 0.5 (note dropped non-men/women response above)
+# We code female: -0.5, male: 0.5
+# note dropped non-men/women response above
 dat <- dat |>
   mutate(
-    gender = factor(
-      gender,
-      levels = 1:2,
-      labels = c("Man", "Woman")
+    sex = factor(
+      sex,
+      levels = c(2, 1),
+      labels = c("Woman", "Man")
     )
   )
 
 ## Group membership
 dat_membership <- select(dat, starts_with("member"))
 dat <- select(dat, -starts_with("member"))
-names(dat_membership) <- paste0("m_", groups)
+names(dat_membership) <- paste0("m_", groups$group)
 # Recode responses Yes: 1, No (and everything else) (0)
 dat_membership <- dat_membership |>
   mutate(
@@ -382,11 +411,11 @@ dat_membership <- dat_membership |>
   )
 dat <- bind_cols(dat, dat_membership)
 
-# Gender breakdown
-genders <- dat |>
-  count(gender) |>
-  mutate(gender = str_glue("{gender}: {n}")) |>
-  pull(gender) |>
+# sex breakdown
+sexes <- dat |>
+  count(sex) |>
+  mutate(sex = str_glue("{sex}: {n}")) |>
+  pull(sex) |>
   str_to_sentence()
 
 # Save cleaned data
@@ -395,29 +424,42 @@ write_csv(dat, "data/data.csv")
 
 ## Descriptive results
 
-After excluding `{r} s$total_before_exclusions - s$total_after_exclusions` individuals who did not satisfy the inclusion criteria (`{r} s$not_attention` failed the attention check; `{r} s$not_english` reported a non-English first language; `{r} s$not_us` were not based in the US; `{r} s$missing` had more than 5 missing values in the disease detection task), and `{r} s$not_mw` individuals who reported a gender other than 'Man' or 'Woman', the final sample consisted of `{r} s$total_after_exclusions` individuals with the following self-reported gender breakdown: `{r} paste0(genders, collapse = ", ")`. We summarize the study's key variables in @tbl-desc, and their correlations in @tbl-cor. We conducted all analyses in R and used the marginaleffects package for testing slopes and their contrasts, and tidyverse for data cleaning and visualization [@r2024; @me2024; @tidyverse2019].
+After excluding `{r} s$total_before_exclusions - s$total_after_exclusions` individuals who did not satisfy the inclusion criteria (`{r} s$not_attention` failed the attention check; `{r} s$not_english` reported a non-English first language; `{r} s$not_us` were not based in the US; `{r} s$missing` had more than 5 missing values in the disease detection task) and who reported a sex other than 'Man' or 'Woman' (`{r} s$not_mw`), the final sample consisted of `{r} s$total_after_exclusions` individuals with the following self-reported sex breakdown: `{r} paste0(sexes, collapse = ", ")`. We summarize the study's key variables in @tbl-desc, and their correlations in @tbl-cor. We conducted all analyses in R and used the marginaleffects package for testing slopes and their contrasts, and tidyverse for data cleaning and visualization [@r2024; @me2024; @tidyverse2019].
 
 ```{r}
 #| label: tbl-desc
-#| tbl-cap: Descriptives of key variables.
+#| tbl-cap: Descriptive statistics.
+
+# Lookup table of labels
+lookup <- groups$group
+names(lookup) <- groups$label
+lookup <- c(
+  lookup,
+  c(
+    Cinfected = "crit_sick",
+    `d' (sick)` = "dprime_sick",
+    Ccriminal = "crit_criminal",
+    `d' (criminal)` = "dprime_criminal",
+    `Disgust sensitivity` = "pds"
+  )
+)
 
 dat |>
   select(
     crit_sick,
     crit_criminal,
-    all_of(groups[1:4]),
+    all_of(groups$group[1:4]),
     pds,
-    age
+    Age = age
   ) |>
+  rename(any_of(lookup)) |>
   datasummary_skim(
     output = "tinytable",
     fun_numeric = list(
       M = mean,
       SD = sd,
       Min = min,
-      max = Max,
-      Histogram = \(x) "",
-      `% Missing` = PercentMissing
+      max = Max
     )
   ) |>
   style_tt(
@@ -426,7 +468,7 @@ dat |>
   )
 ```
 
-Notably, @tbl-cor shows that the decision criteria for the two detection tasks were moderately positively correlated, and that prejudice toward all four key target groups were moderately positively intercorrelated. Pairwise correlations between decision criteria in the sickness detection task and prejudice toward the four key groups were not statistically significant. Age correlated negatively with prejudice toward elderly people and individuals with physical disability.
+@tbl-cor shows the correlations between all primary variables. The decision criteria for the two detection tasks were moderately positively correlated. Moderate positive correlations were also observed between prejudice measures toward the four key target groups.
 
 ```{r}
 #| label: tbl-cor
@@ -434,14 +476,15 @@ Notably, @tbl-cor shows that the decision criteria for the two detection tasks w
 
 dat |>
   select(
-    d_sick = dprime_sick,
-    d_crim = dprime_criminal,
-    c_sick = crit_sick,
-    c_crim = crit_criminal,
-    all_of(groups[1:4]),
+    crit_sick,
+    crit_criminal,
+    dprime_sick,
+    dprime_criminal,
+    all_of(groups$group[1:4]),
     pds,
-    age
+    Age = age
   ) |>
+  rename(any_of(lookup)) |>
   correlation(p_adjust = "none") |>
   datasummary_correlation(
     output = "tinytable",
@@ -461,23 +504,25 @@ dat |>
   )
 ```
 
-## Hypothesis tests
+## Hypothesis 1
 
-### H1: Prejudice toward groups with superficially anomalous appearance
-
-We then turned to our main hypothesis, that people with a liberal infectious disease decision criterion---a tendency to respond "Sick"---would report greater prejudice toward people with obesity, elderly people, people with a physical disability, and people with a facial disfigurement. To test this hypothesis, we regressed prejudice scores for these groups (in separate models) on *c*~infected~. Due to reported gender differences, we included gender (coded as woman: -0.5, man: 0.5) as a covariate to reduce residual variance. We report the key regression parameters in the first four rows of @fig-coef (left; red), @tbl-t1, and visualize all bivariate relations in @fig-scatter.
-
-Note that we calculated the criterion as $c = -\frac{\Phi^{-1}(HR) + \Phi^{-1}(FAR)}{2}$, and thus negative values of *c*~infected~ indicate a ("liberal") bias toward responding "Yes" [sick / not criminal], and positive values indicate a ("conservative") bias toward responding "No" [healthy / not criminal]. While our Stage 1 RR discussed the hypotheses in this manner, we had inadvertently omitted the negative sign in the formula for *c*. H1 would thus be supported by a negative regression coefficient of *c*~infected~.
+We then tested our main hypothesis, H1, that people with a liberal infectious disease decision criterion---a tendency to respond "sick"---would report greater prejudice toward people with obesity, elderly people, people with a physical disability, and people with a facial disfigurement. To test H1, we regressed prejudice scores for these groups (in separate models) on *C*~infected~. We included sex (coded as woman: -0.5, man: 0.5) as a covariate to reduce residual variance. We also tested models that included the interaction effect between sex and *C*~infected~. The interaction was not significant in any of the four models, and therefore in @fig-coef (and @tbl-t1) we only report the common coefficient for these groups. We visualize all bivariate relations in @fig-scatter and report the key regression parameters in the first four rows of @fig-coef (left; red; see also @tbl-t1). Of the four key target groups, *C*~infected~ had a statistically significant negative relation only with prejudice toward individuals with a facial disfigurement (@fig-coef, Test 1).
 
 ```{r}
 #| label: fig-scatter
-#| fig-cap: 'Scatterplots and regression lines (with 95%CIs) for each prejudice scale on signal detection criteria in the contagion detection task. Negative values of *c*~infected~ indicate a "liberal" response bias toward answering "sick", and positive values indicate a "conservative" bias toward answering "healthy". Points are jittered to reduce overplotting.'
-#| fig-height: 4.2
+#| fig-cap: 'Scatterplots and regression lines (with 95%CIs) for each prejudice scale on signal detection criteria in the infectious disease detection task. Negative values of *C*~infected~ indicate a "liberal" response bias toward answering "sick", and positive values indicate a "conservative" bias toward answering "healthy". Points are jittered to reduce overplotting.'
+#| fig-height: 4.4
 
 dat |>
-  select(pid, gender, crit_sick, all_of(groups)) |>
-  pivot_longer(all_of(groups)) |>
-  mutate(name = factor(name, levels = groups)) |>
+  select(pid, sex, crit_sick, all_of(groups$group)) |>
+  pivot_longer(all_of(groups$group)) |>
+  mutate(
+    name = factor(
+      name,
+      levels = groups$group,
+      labels = groups$label
+    )
+  ) |>
   ggplot(aes(crit_sick, value)) +
   coord_cartesian(
     ylim = 0:1
@@ -487,7 +532,7 @@ dat |>
     aesthetics = c("color", "fill")
   ) +
   scale_x_continuous(
-    "Criterion [infected]"
+    "C~infected~"
   ) +
   scale_y_continuous(
     "Prejudice",
@@ -503,41 +548,42 @@ dat |>
     linewidth = 0.5,
     col = "black"
   ) +
-  facet_wrap("name", ncol = 5)
+  facet_wrap("name", ncol = 5) +
+  theme(axis.title.x = element_markdown())
 ```
 
 ```{r}
 #| label: models-fit
 
 # Code variables for models
-contrasts(dat$gender) <- c(-0.5, 0.5)
+contrasts(dat$sex) <- c(Woman = -0.5, Man = 0.5)
 dat$age <- dat$age - mean(dat$age)
 
 # Fit all regressions
 dat_fit <- tibble(
-  group = groups,
+  group = groups$group,
   # Analysis 1
   fit1 = map(
     group,
-    ~ lm(str_glue("{.x} ~ crit_sick + gender"), data = dat)
+    ~ lm(str_glue("{.x} ~ crit_sick + sex"), data = dat)
   ),
   fit1sex = map(
     group,
-    ~ lm(str_glue("{.x} ~ crit_sick * gender"), data = dat)
+    ~ lm(str_glue("{.x} ~ crit_sick * sex"), data = dat)
   ),
   # Analysis 2
   # Models without people not members in that category
   fit2 = map(
     group,
     ~ lm(
-      str_glue("{.x} ~ crit_sick + gender"),
+      str_glue("{.x} ~ crit_sick + sex"),
       data = filter(dat, get(paste0("m_", .x)) != 1)
     )
   ),
   fit2sex = map(
     group,
     ~ lm(
-      str_glue("{.x} ~ crit_sick * gender"),
+      str_glue("{.x} ~ crit_sick * sex"),
       data = filter(dat, get(paste0("m_", .x)) != 1)
     )
   ),
@@ -545,11 +591,11 @@ dat_fit <- tibble(
   # Adjusting for Ccriminal
   fit3 = map(
     group,
-    ~ lm(str_glue("{.x} ~ crit_sick + gender + crit_criminal"), data = dat)
+    ~ lm(str_glue("{.x} ~ crit_sick + sex + crit_criminal"), data = dat)
   ),
   fit3sex = map(
     group,
-    ~ lm(str_glue("{.x} ~ crit_sick * gender + crit_criminal"), data = dat)
+    ~ lm(str_glue("{.x} ~ crit_sick * sex + crit_criminal"), data = dat)
   ),
 )
 
@@ -562,7 +608,7 @@ dat_fit <- dat_fit |>
       ~ map_lgl(
         .x,
         ~ summary(.x)$coefficients[
-          "crit_sick:gender1",
+          "crit_sick:sex1",
           "Pr(>|t|)"
         ] <=
           0.05
@@ -578,10 +624,10 @@ dat_fit <- dat_fit |>
   select(group, i1, i2, i3, m1, m2, m3)
 
 # Conduct all tests
-# T1: Baseline OR separate gender coef if interaction is significant
+# T1: Baseline OR separate sex coef if interaction is significant
 # T2: T1 but exclude participants who identify with target group
 # T3: T1 but adjust for crit_criminal
-# T4: T3 where we test crit_sick > gender AND crit_sick > crit_criminal
+# T4: T3 where we test crit_sick > sex AND crit_sick > crit_criminal
 
 dat_fit <- dat_fit |>
   mutate(
@@ -594,82 +640,107 @@ dat_fit <- dat_fit |>
         .x,
         df = .x$df.residual,
         hypothesis = c(
-          c_sick = "crit_sick = 0",
-          c_crim = "crit_criminal = 0",
-          gender = "gender = 0",
-          `c_sick - gender` = "crit_sick - gender = 0",
-          `c_sick - c_crim` = "crit_sick - crit_criminal = 0"
+          crit_sick = "crit_sick = 0",
+          crit_criminal = "crit_criminal = 0",
+          sex = "sex = 0",
+          `crit_sick - sex` = "crit_sick - sex = 0",
+          `crit_sick - crit_criminal` = "crit_sick - crit_criminal = 0"
         )
       )
     )
   )
 
-# If interaction is non-significant, gender slopes are identical
+# If interaction is non-significant, sex slopes are identical
 # so here we pick first to represent both
 dat_fit <- dat_fit |>
   mutate(
-    t1 = if_else(i1, t1, map(t1, ~ slice(.x, 1))),
-    t2 = if_else(i2, t2, map(t2, ~ slice(.x, 1))),
-    t3 = if_else(i3, t3, map(t3, ~ slice(.x, 1)))
+    t1 = if_else(i1, t1, map(t1, ~ slice(.x, 1) |> mutate(sex = "Both"))),
+    t2 = if_else(i2, t2, map(t2, ~ slice(.x, 1) |> mutate(sex = "Both"))),
+    t3 = if_else(i3, t3, map(t3, ~ slice(.x, 1) |> mutate(sex = "Both")))
     # t4 is done without interaction
   )
 ```
 
-Of the four key target groups, *c*~infected~ had a statistically significant negative relation only with prejudice toward individuals with a facial disfigurement (@fig-coef, Test 1; @tbl-t1). Note that the interaction between gender and *c*~infected~ was not significant in predicting prejudice toward any of the four key groups, and therefore in @fig-coef and @tbl-t1 we only report a common coefficient for these groups.
-
 ```{r}
 #| label: fig-coef
-#| fig-cap: "Regression slopes (left; tests 1-3) and contrasts (right; contrasting slope of Csick with Ccrim and gender) for all 13 target groups. Filled points indicate statistically significant negative coefficients (Slopes: one-sided p-value; Contrasts: two-sided p-value), empty points indicate non-significant coefficients. Circles: Both genders or Women; Squares: Men."
-#| fig-height: 3.4
+#| fig-cap: "Regression coefficients of C~infected~ relevant to tests 1 (adjusted for Sex) and 2 (excluding individuals self-identifying with the target group), and tests 3 (adjusted for C~criminal~ and Sex) and 4 (C~criminal~ and Sex coefficients)."
+#| fig-height: 3.8
 
-dat_fit |>
-  mutate(group = fct_inorder(group) |> fct_rev()) |>
-  select(group, t1:t4) |>
-  pivot_longer(-group) |>
+tmp <- dat_fit |>
+  left_join(groups) |>
+  mutate(group = fct_inorder(label) |> fct_rev()) |>
+  select(group, c(t1, t2, t4)) |>
+  pivot_longer(-group, names_to = "test") |>
   unnest(value) |>
-  # Take out coefficients from t4
-  filter(!(name == "t4" & !str_detect(hypothesis, "-"))) |>
+  mutate(term = coalesce(term, hypothesis)) |>
+  filter(!str_detect(term, " - ")) |>
   mutate(
-    term = if_else(!is.na(term), "Slope", "Contrast"),
-    name = if_else(!is.na(hypothesis), hypothesis, name) |>
-      factor(
-        levels = c("t1", "t2", "t3", "c_sick - c_crim", "c_sick - gender"),
-        labels = c("1", "2", "3", "Csick - Ccrim", "Csick - gender")
-      ) |>
-      fct_rev(),
     p.value = coalesce(p.value.nonsup, p.value),
-    gender = if_else(!is.na(gender), gender, "Woman"),
+    sex = fct_na_value_to_level(sex, "Both"),
     sig = p.value <= 0.05,
-    p.group = interaction(name, gender),
-    shape = interaction(sig, gender)
+    shape = interaction(sig, sex),
+    test = str_remove(test, "t"),
+    panel = if_else(test == "4", "Contrast", "Slope") |>
+      factor(
+        levels = c("Slope", "Contrast"),
+        labels = c("Tests 1 & 2", "Tests 3 & 4")
+      ),
+    Coefficient = str_glue("{term} (Test {test})") |>
+      factor(
+        levels = c(
+          "crit_sick (Test 1)",
+          "crit_sick (Test 2)",
+          "crit_sick (Test 4)",
+          "crit_criminal (Test 4)",
+          "sex (Test 4)"
+        ),
+        labels = c(
+          "C~infected~ (Test 1)",
+          "C~infected~ (Test 2)",
+          "C~infected~ (Test 3)",
+          "C~criminal~ (Test 4)",
+          "Sex (Test 4)"
+        )
+      )
   ) |>
-  select(group, term, name, gender, estimate:conf.high, sig, p.group, shape) |>
+  select(
+    group,
+    panel,
+    test,
+    term,
+    Coefficient,
+    sex,
+    estimate:conf.high,
+    sig,
+    shape
+  )
+
+tmp |>
   ggplot(
     aes(
       x = estimate,
       y = group,
-      color = name,
-      group = p.group
+      color = Coefficient,
+      shape = sex
     )
   ) +
   scale_y_discrete() +
   scale_x_continuous(
-    "Estimate [95% CI]"
+    "Estimate [95% CI]",
+    breaks = extended_breaks()
   ) +
   scale_shape_manual(
+    "Sex",
     values = c(
-      "FALSE.Woman" = "circle filled",
-      "TRUE.Woman" = "circle",
-      "FALSE.Man" = "square filled",
-      "TRUE.Man" = "square"
+      "Both" = "circle",
+      "Woman" = "square",
+      "Man" = "triangle"
     )
   ) +
   scale_color_brewer(
-    "Test",
-    palette = "Set1",
-    direction = -1
+    "Coefficient",
+    palette = "Set1"
   ) +
-  guides(shape = "none", color = guide_legend(reverse = TRUE)) +
   geom_vline(
     xintercept = 0,
     color = "gray70",
@@ -678,61 +749,64 @@ dat_fit |>
   geom_pointrange(
     aes(
       xmin = conf.low,
-      xmax = conf.high,
-      shape = shape
+      xmax = conf.high
     ),
-    fill = "white",
     linewidth = .5,
     fatten = 3,
-    position = position_dodge2(width = .8, preserve = "single")
+    position = position_dodge2(width = .7, reverse = TRUE),
+    key_glyph = "point"
   ) +
-  facet_manual("term", design = c("BBBAA"), scales = "free") +
+  guides(
+    shape = guide_legend(override.aes = list(size = 2)),
+    color = guide_legend(override.aes = list(size = 2))
+  ) +
+  facet_manual(
+    "panel",
+    design = "AAABB",
+    scales = "free_x"
+  ) +
   theme(
     axis.title.y = element_blank(),
-    legend.position = "right"
+    strip.text = element_markdown(),
+    legend.text = element_markdown(),
+    plot.margin = unit(c(8, 10, 8, 8), "pt")
   )
 ```
 
-Following our protocol, we then examined the regression coefficients in models that excluded participants who self-identified with the target group (Test 2); adjusted for *c*~criminal~ (Test 3); and compared *c*~infected~ with *c*~criminal~ and the gender coefficient (Test 4). Coefficients from models that excluded participants who self-identified with the target group are shown in blue in @fig-coef (Test 2; @tbl-t2): Results did not differ from those of the main analysis.
+Following the protocol, we then examined the regression coefficients in models that excluded participants who identified with the target group (Test 2); adjusted for *C*~criminal~ (Test 3); and compared *C*~infected~ with *C*~criminal~ and the sex coefficient (Test 4). Coefficients from models that excluded participants who identified with the target group are shown in blue in @fig-coef (Test 2). For details, see @tbl-t2. Results did not differ from those of the main analysis.
 
-When adjusting for *c*~criminal~ (Test 3), the results were qualitatively similar, with the key difference that the relationship between *c*~infected~ and prejudice toward individuals with a facial disfigurement was no longer statistically significant (@fig-coef green; @tbl-t3).
+When adjusting for *C*~criminal~ (Test 3), the results were qualitatively similar, with the key difference that the relationship between *C*~infected~ and prejudice toward individuals with a facial disfigurement was no longer statistically significant (@fig-coef; green). For details, see @tbl-t3.
 
-Finally, we tested the regression coefficient for *c*~infected~ against that of gender and *c*~criminal~ (@fig-coef Contrast; @tbl-t4). A negative estimate in @fig-coef would indicate that *c*~infected~ is more negatively associated with prejudice than either *c*~criminal~ (purple) or gender (yellow). *c*~infected~ predicted prejudice toward obese individuals more negatively than *c*~criminal~, but the difference was not statistically significant for the other three groups. On the other hand, the coefficient for *c*~infected~ was significantly more positive than the prejudice gender difference (recall we coded Woman: -0.5 and Man: 0.5).
+Finally, we tested the regression coefficient for *C*~infected~ against that of *C*~criminal~ and sex (@fig-coef; purple & yellow; For details, see @tbl-t4.) *C*~criminal~ predicted prejudice toward obese individuals more negatively than *C*~infected~, but the difference was not statistically significant for the other three groups. On the other hand, the prejudice sex difference was significantly more positive than the coefficient for *C*~infected~ (recall we coded Woman: -0.5 and Man: 0.5, so men reported greater prejudice).
 
 Overall, then, across the four target groups and four analyses, we found at best weak evidence hypothesis 1.
 
-### H2: Prejudice toward groups included in detection task
+## Hypotheses 2, 3, and 4
 
-Next, we turned to H2, whether the smoke detector principle holds for the social group for which the response bias was measured (@fig-coef "tb" and "prison"; @tbl-t1 - @tbl-t4). *c*~infected~ was negatively associated with prejudice toward criminals (in analyses 1 & 2) but not toward individuals with infectious disease. The coefficient for *c*~infected~ was not statistically significantly different from those of *c*~criminal~ or gender. We therefore found only partial support for hypothesis 2.
+Next, we turned to H2, whether the smoke detector principle holds for the social group for which the response bias was measured (i.e. prejudice toward people with tuberculosis and toward prisoners; see also @tbl-t1 to @tbl-t4). *C*~infected~ was negatively associated with prejudice toward prisoners (in analyses 1 & 2) but not toward individuals with tuberculosis. The coefficient for *C*~infected~ was not statistically significantly different from those of *C*~criminal~ or sex (@tbl-t4). We therefore found no support for hypothesis 2.
 
-### H3: Prejudice toward groups where prejudice is putatively motivated by pathogen avoidance, but not based on anomalous appearance
+We then tested H3, about prejudice toward groups for which prejudice is putatively motivated by pathogen avoidance, but not based on anomalous appearance. *C*~infected~ was negatively associated with prejudice toward gay men and lesbian women across tests 1 to 3 (@fig-coef). We found a significant interaction between *C*~infected~ and sex in predicting prejudice toward immigrants. *C*~infected~ was negatively associated with prejudice toward immigrants for women but not for men. *C*~infected~ was not negatively and significantly associated with prejudice toward homeless individuals or drug addicts. We therefore found partial support for H3.
 
-*c*~infected~ was negatively associated with prejudice toward gay men and lesbian women across tests 1 - 3 (@fig-coef Slope). Moreover, the *c*~infected~ coefficients were more negative than those associated with either *c*~criminal~ or gender (@fig-coef Contrast).
-
-*c*~infected~ was not negatively and significantly associated with prejudice toward either homeless individuals or drug addicts, but negatively associated with prejudice toward immigrants among women and not statistically significant among men.
-
-### H4: Prejudice toward common targets
-
-Finally, *c*~infected~ was not negatively associated with prejudice toward either politicians or lawyers. (Instead, across tests, the relationship to prejudice toward politicians was positive and significant.)
+Finally, we tested H4 about prejudice toward target groups for which prejudice is unrelated to pathogen avoidance. *C*~infected~ was not negatively associated with prejudice toward either politicians or lawyers. Instead, across tests, the relationship to prejudice toward politicians was positive and significant.
 
 ## Exploratory analyses
 
-### Disgust sensitivity
+### Pathogen disgust sensitivity
 
 ```{r}
 #| label: tbl-pds
 #| tbl-cap: Regression coefficients indicating relations between pathogen disgust sensitivity and SDT parameters (first two rows) and prejudice.
 
-fit_pds1 <- lm(pds ~ crit_sick + dprime_sick + gender + age, data = dat) |>
+fit_pds1 <- lm(pds ~ crit_sick + dprime_sick + sex + age, data = dat) |>
   tidy(conf.int = TRUE) |>
   filter(str_detect(term, "_sick")) |>
   mutate(group = "pds", .before = 1)
 
 fit_pds2 <- tibble(
-  group = groups,
+  group = groups$group,
   fit = map(
     group,
-    ~ lm(str_glue("{.x} ~ pds + gender + age"), data = dat) |>
+    ~ lm(str_glue("{.x} ~ pds + sex + age"), data = dat) |>
       tidy(conf.int = TRUE) |>
       filter(term == "pds")
   )
@@ -763,18 +837,68 @@ bind_rows(
   )
 ```
 
-We then examined relations between pathogen disgust sensitivity, bias and sensitivity in the infectious disease detection task, and prejudice. We regressed PDS on c, d', gender[^g1], and age; and in separate models all target groups' prejudice on pds, gender, and age. We report these results in @tbl-pds.
+We examined relations between pathogen disgust sensitivity, response bias and sensitivity in the infectious disease detection task, and prejudice. We report these results in @tbl-pds. First, we regressed pathogen disgust sensitivity on *C*~infected~, d-prime, age, and sex[^g1]. In short, pathogen disgust sensitivity was negatively associated with *C*~infected~, but not with d-prime. In other words, stronger pathogen disgust sensitivity was associated with a tendency to make more false alarms in the sickness detection task, but not with an increased sensitivity.
+
+Second, in separate models we regressed prejudice toward each target group on pathogen disgust sensitivity, age, and sex. In short, here we found that higher pathogen disgust sensitivity was associated with more prejudice for 8 out of 13 groups: Obese people, people with tuberculosis, people who had been to prison, gay men, lesbian women, homeless people, addicts, and immigrants. Higher pathogen disgust sensitivity was associated with less prejudice toward eldrely people and lawyers. For the remaining three groups, the relation was not significant.
 
 ```{r}
 library(report)
-x <- summary(report(t.test(pds ~ gender, data = dat)))
+x <- summary(report(t.test(pds ~ sex, data = dat)))
 ```
 
 [^g1]: `{r} x`
 
-### Detection task performance
+### Measurement
 
-We then report task performance and SDT parameters in detail from both tasks. Results in @fig-sdt.
+We then considered the quality of our measures. First we calculated Cronbach's alphas for all measurement scales and found them to be acceptable (all > .7, see @tbl-alpha). Second, because the number of stimuli for our tasks were limited, we calculated how many individuals' hit and false alarm rates had to be adjusted. These numbers are shown in @tbl-sdt-counts. For the sickness detection task, 13% of individuals had a false alarm rate of zero and 1% a rate of one, 7% had a hit rate of zero and 2% a rate of one. For the criminality detection task, 12% had a false alarm rate of zero and 2% a rate of one, and 6% had a hit rate of one and 7% a rate of one. This shows that we did not need to adjust the rates for the majority of participants.
+
+```{r}
+#| label: tbl-alpha
+#| tbl-cap: Cronbach's alphas for each prejudice scale and pathogen disgust sensitivity.
+
+library(performance)
+tibble(
+  group = c(groups$group, "pds"),
+  alpha = map_dbl(
+    group,
+    ~ select(scl_raw, starts_with(.x)) |>
+      cronbachs_alpha()
+  )
+) |>
+  pivot_wider(names_from = group, values_from = alpha) |>
+  .tt()
+```
+
+```{r}
+#| label: tbl-sdt-counts
+#| tbl-cap: Counts and percentages of participants with N false alarms ("fa") and hits ("hit") in each task.
+
+# Unadjusted rates
+sdt |>
+  select(task, hit, fa) |>
+  pivot_longer(hit:fa) |>
+  count(task, name, value) |>
+  mutate(
+    n = str_glue("{n} ({percent(n / sum(n), 1)})"),
+    .by = c(task, name)
+  ) |>
+  pivot_wider(
+    names_from = value,
+    values_from = n,
+    names_prefix = "Nobs="
+  ) |>
+  select(-task, Type = name) |>
+  .tt() |>
+  group_tt(
+    i = c(rep("Infectious disease", 2), rep("Criminal", 2))
+  ) |>
+  style_tt(
+    i = c(1, 4),
+    bold = TRUE
+  )
+```
+
+Third, we examined task performance and signal detection parameters in detail for both detection tasks (see @tbl-sdt). We examined item functioning of the stimuli in both tasks by calculating percentages of correct judgments for each stimulus. In short, for the stimuli in the sickness detection task, the percentage correct ranged from about 20% to 85%, and for criminality detection from about 45% to 75%. We then compared the hit and false alarm rates for each stimuli in our study to those in a prior study using the same stimuli; by and large these were very similar (see @fig-sdt-compare).
 
 ```{r}
 #| label: tbl-sdt
@@ -799,8 +923,6 @@ sdt |>
   pivot_wider(names_from = task, values_from = Estimate) |>
   .tt()
 ```
-
-We also examined the item functioning of the stimuli in the two dection tasks by calculating the percentages correct for each stimulus. These results are shown in @fig-sdt.
 
 ```{r}
 #| label: fig-sdt
@@ -850,8 +972,6 @@ sdt_raw |>
     panel.grid.major.x = element_line()
   )
 ```
-
-We then compared the hit and false alarm rates for each stimuli in our study to those in a prior study using the same stimuli; by and large these were very similar (@fig-sdt-compare).
 
 ```{r}
 #| label: fig-sdt-compare
@@ -924,16 +1044,16 @@ pb <- tmp |>
 (pa | pb)
 ```
 
-### Hypothesis test
+### Overall hypothesis test
 
-We then considered an alternative analytic approach for testing the overall hypothesis that a liberal infectious disease decision criterion is associated with prejudice toward the four key groups (H1). Above, we tested this idea separately for each of the four groups. Here, we model the relationship between *c*~infected~ and prejudice across the four groups in one multilevel model to accomplish three goals: (A) Estimate an average relation between *c*~infected~ and prejudice across the groups; (B) avoid overfitting target-group-specific relations using partial pooling; and (C) evaluate evidence for the null hypothesis that the average relationship between *c*~infected~ and prejudice is zero using a bayes factor approximated with the Savage-Dickey density ratio [@wagenmakersBayesianHypothesisTesting2010].
+We then considered an alternative analytic approach for testing the overall hypothesis that a liberal infectious disease decision criterion is associated with prejudice toward the four key groups (H1). Above, we tested this idea separately for each of the four groups. Here, we model the relationship between *C*~infected~ and prejudice across the four groups in one multilevel model to accomplish three goals: (A) Estimate an average relation between *C*~infected~ and prejudice across the groups; (B) avoid overfitting target-group-specific relations using partial pooling; and (C) evaluate evidence for the null hypothesis that the average relationship between *C*~infected~ and prejudice is zero using a bayes factor approximated with the Savage-Dickey density ratio [@wagenmakersBayesianHypothesisTesting2010].
 
 We modeled the z-scored prejudice score P for the *i*th participant and *j*th target group with a standard multilevel model specified as
 
 $$
 \begin{align}
 \text{P}_{ij} &\sim \operatorname{Normal}(\eta_{ij}, \sigma^2), \\
-\eta_{ij} &= \beta_0 + \gamma_{0j} + \delta_{0i} + \beta_1\text{G}_{ij} +
+\eta_{ij} &= \beta_0 + \gamma_{0j} + \delta_{0i} + \beta_1\text{S}_{ij} +
   (\beta_2 + \gamma_{1j})\text{C}_{ij}, \\
 \begin{bmatrix}
   \gamma_0 \\ \gamma_1
@@ -946,16 +1066,19 @@ $$
   \end{pmatrix}
 \right), \\
 \delta_0 &\sim \operatorname{Normal}(0, \tau_{\delta}), \\
+\tau &\sim \operatorname{t}^+(7, 0, 0.33), \\
 \beta_2 &\sim \operatorname{Normal}(0, \phi).
 \end{align}
 $$
 
-Above, we denote prejudice as P, gender (woman: -0.5, man: 0.5) as G, and *c*~infected~ as C. $\beta_2$ and $\gamma_1$ are the population-level and target-group-specific deviations in regression slopes of prejudice on *c*~infected~, respectively. Critically, because we could not determine an exact prediction for the average effect size based on previous work or theory, we estimated the model across a range of priors $\phi \in \{0.1, 0.25, 0.5, 0.75, 1\}$. For the other model parameters, we used the brms' package's default priors [@brms2017; @brms2018].
+Above, we denote prejudice as P, sex (woman: -0.5, man: 0.5) as S, and *C*~infected~ as C. $\beta_2$ and $\gamma_1$ are the population-level and target-group-specific deviations in regression slopes of prejudice on *C*~infected~, respectively. Critically, because we could not determine an exact prediction for the average effect size based on previous work or theory, we estimated the model across a range of priors for the standard deviation of the population-level relationship $\phi \in \{0.1, 0.25, 0.5, 0.75, 1\}$. For the other model parameters, we used the brms' package's default priors [@brms2017; @brms2018].
 
 ```{r}
 #| label: fit-glmm
+
 library(brms)
-library(cmdstanr)
+# library(cmdstanr)
+
 # Model estimation options, customize in .Renviron
 dir.create("cache", FALSE)
 options(
@@ -967,24 +1090,26 @@ options(
 # Reshape data for multilevel model and z-score prejudice scores
 # Don't include tb and prison targets
 dat_b <- dat |>
-  select(pid, gender, age, crit_sick, obese, elder, limbs, mark) |>
+  select(pid, sex, age, crit_sick, obese, elder, limbs, mark) |>
   mutate(
     across(
-      any_of(groups),
+      any_of(groups$group),
       ~ scale(.) |> as.numeric()
     )
   ) |>
   pivot_longer(
-    any_of(groups),
+    any_of(groups$group),
     names_to = "target",
     values_to = "prejudice"
   )
 
 # Specify model
 bform <- bf(
-  prejudice ~ gender + crit_sick + (1 | pid) + (1 + crit_sick | target)
+  prejudice ~ sex + crit_sick + (1 | pid) + (1 + crit_sick | target)
 )
 
+# Fit model with all priors
+# We give tau a tighter prior to help convergence
 fits <- tibble(
   phi = number(c(.1, .25, .5, .75, 1)),
   prior = str_glue("normal(0,{phi})"),
@@ -994,17 +1119,19 @@ fits <- tibble(
     ~ brm(
       bform,
       data = dat_b,
-      prior = prior_string(.x, class = "b", coef = "crit_sick"),
+      prior = prior_string(.x, class = "b", coef = "crit_sick") +
+        prior(student_t(7, 0, .33), class = "sd", group = "target"),
       iter = 5000,
       warmup = 2000,
       file = str_glue("cache/brm-phi-{.y}"),
-      control = list(adapt_delta = 0.999),
+      control = list(adapt_delta = 0.995),
       file_refit = "never",
       sample_prior = "yes"
     )
   )
 )
 
+# Wrangle fixed and random coefficients out of the model
 fits <- fits |>
   mutate(
     fixef = map(
@@ -1023,27 +1150,28 @@ fits <- fits |>
     .keep = "unused"
   )
 
+# Calculate % in region of practical equivalence
 x <- rope(fits$fixef[[5]]$samples$H1, range = c(-0.1, 0.1))
 x <- percent(x$ROPE_Percentage, .1)
 ```
 
-First, we show the estimated relation between *c*~infected~ and prejudice toward the average target group from the multilevel model in the bottom row of @fig-bf (left). (We show these parameters for $\phi=1$ because the estimates did not meaningfully differ across priors.) The average relation is neglibly small and closely centered on zero (with `{r} x` of the posterior distribution within [-0.1, 0.1]), suggesting that practically meaningfully large average relations are unlikely.
+First, we show the estimated relation between *C*~infected~ and prejudice toward the average target group from the multilevel model in the bottom row of @fig-bf (left). (We show these parameters for $\phi = 1$ because the estimates did not meaningfully differ across priors.) The average relation is neglibly small and closely centered on zero (with `{r} x` of the posterior distribution within [-0.1, 0.1]), suggesting that practically meaningfully large average relations are unlikely.
 
 ```{r}
 #| label: fig-bf
-#| fig-cap: "Results from multilevel model assessing the relationship between C~infected~ and prejudice across target groups. Left: Estimated C~infected~ - prejudice relationships. Filled points indicate partially pooled target-group-specific estimates from multilevel model (with the average shown in the bottom row). Empty points indicate fixed-effect target-group-specific estimates of the corresponding models discussed in the main text. Note for the models here, we standardized prejudice scores. Right: Evidence ratio favoring the point null over the alternative (relationship is non-null), as a function of the standard deviation of the prior distribution on the average relationship."
+#| fig-cap: "Results from multilevel model assessing the relationship between C~infected~ and prejudice across target groups. Left: Estimated C~infected~ - prejudice relationships. Filled points indicate partially pooled target-group-specific estimates from multilevel model (with the average shown in the bottom row). Empty points indicate fixed-effect target-group-specific estimates of the corresponding models discussed in the main text. Note for the models here, we standardized prejudice scores. Right: Evidence ratio favoring the point null over the alternative (relationship is non-null), as a function of the standard deviation of the average relationship's prior distribution."
 #| fig-asp: 0.4
 #| fig-width: 5
 #| out-width: 70%
 
-# Refit stdz FE models
+# Refit fixed effects models with standardized outcome variable
 fits_lm <- tibble(
   Group = c("obese", "elder", "limbs", "mark"),
   lm = map(
     Group,
     ~ tidy(
       lm(
-        str_glue("scale({.x}) ~ crit_sick + gender"),
+        str_glue("scale({.x}) ~ crit_sick + sex"),
         data = dat
       ),
       conf.int = TRUE
@@ -1074,8 +1202,10 @@ pa <- bind_rows(
 ) |>
   mutate(model = "Pooled") |>
   bind_rows(fits_lm) |>
+  left_join(groups, by = c("Group" = "group")) |>
+  mutate(label = coalesce(label, Group)) |>
   ggplot() +
-  aes(x = Estimate, y = Group, fill = model) +
+  aes(x = Estimate, y = label, fill = model) +
   scale_x_continuous(
     "Estimate",
     expand = expansion(.1)
@@ -1114,7 +1244,7 @@ pb <- fits |>
   ) +
   scale_y_continuous(
     "Evid. Ratio H0/HA",
-    limits = c(0, 20)
+    limits = c(0, 18)
   ) +
   geom_line(
     linewidth = .33,
@@ -1136,9 +1266,9 @@ x <- fits_coef |>
 x <- setNames(x, pull(fits_coef |> filter(Star == "*"), Group))
 ```
 
-Second, the filled points and intervals show the partially pooled estimates of $\gamma_1$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). Partial pooling has shrunk the most estimates toward their mean, and subsequently provided more accurate estimates that avoid overfitting. Neither the average relation nor the group-specific relations were credibly different from zero at the 95% confidence level.
+Second, the filled points and intervals show the partially pooled estimates of $\gamma_1$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). Partial pooling has shrunk the most estimates toward their mean and subsequently provided more accurate estimates that avoid overfitting. Neither the average relation nor the group-specific relations were credibly different from zero at the 95% confidence level.
 
-Third, the right panel of @fig-bf shows the evidence ratio between H0: $\beta_2 = 0$ and HA: $\beta_2 \neq 0$. Across the prior distributions that we considered, the evidence for the null hypothesis ranged from weak to very strong. We note that our approximations of the evidence ratio are necessarily tentative because the prior distribution for $\beta_2$ is underdetermined by current theory but nevertheless take them to indicate moderate evidence against the smoke detector principle.
+Third, the right panel of @fig-bf shows the evidence ratio between H0: $\beta_2 = 0$ and HA: $\beta_2 \neq 0$. Across the prior distributions that we considered, the evidence for the null hypothesis ranged from weak to very strong. We note that our approximations of the evidence ratio are necessarily tentative because the prior distribution for $\beta_2$ is underdetermined by current theory but nevertheless take them to indicate moderate evidence against the smoke detector perspective of the relation between pathogen detection and prejudice.
 
 # Appendix: Tables
 
@@ -1172,58 +1302,6 @@ tbl_coef(test = t3)
 #| cache: false
 
 tbl_coef(test = t4, cols = hypothesis, p = p.value)
-```
-
-# Appendix: Measurement
-
-We also considered the quality of our measures. First we calculated Cronbach's alphas for all measurement scales, and found them to be acceptable (@tbl-alpha).
-
-```{r}
-#| label: tbl-alpha
-#| tbl-cap: Cronbach's alphas for each prejudice scale and pathogen disgust sensitivity.
-
-library(performance)
-tibble(
-  group = c(groups, "pds"),
-  alpha = map_dbl(
-    group,
-    ~ select(scl_raw, starts_with(.x)) |>
-      cronbachs_alpha()
-  )
-) |>
-  pivot_wider(names_from = group, values_from = alpha) |>
-  .tt()
-```
-
-Then, because the number of stimuli for our tasks were limited, we calculated how many individuals' hit and false alarm rates had to be corrected. These numbers are shown in the "Nobs=0" (zero hits or false alarms) and "Nobs=7" (all hits or false alarms) columns of @tbl-sdt-counts.
-
-```{r}
-#| label: tbl-sdt-counts
-#| tbl-cap: Counts and percentages of participants with N false alarms ("fa") and hits ("hit") in each task.
-
-# Unadjusted rates
-sdt |>
-  select(task, hit, fa) |>
-  pivot_longer(hit:fa) |>
-  count(task, name, value) |>
-  mutate(
-    n = str_glue("{n} ({percent(n / sum(n), 1)})"),
-    .by = c(task, name)
-  ) |>
-  pivot_wider(
-    names_from = value,
-    values_from = n,
-    names_prefix = "Nobs="
-  ) |>
-  select(-task, Type = name) |>
-  .tt() |>
-  group_tt(
-    i = c(rep("Infectious disease", 2), rep("Criminal", 2))
-  ) |>
-  style_tt(
-    i = c(1, 4),
-    bold = TRUE
-  )
 ```
 
 # Appendix: Sensitivity

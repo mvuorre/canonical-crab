@@ -5,10 +5,20 @@ project:
     - index.qmd
 
 date: 2025-04-16
+freeze: auto
 format:
   html:
     code-fold: true
     toc: true
+    fontsize: 12pt
+    mainfont: Fira Sans
+    other-links:
+      - text: Online supplement
+        href: https://mvuorre.github.io/canonical-crab
+        icon: globe2
+      - text: GitHub Repository
+        href: https://github.com/mvuorre/canonical-crab
+        icon: github
   docx: default
 
 authors:
