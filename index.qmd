@@ -100,11 +100,11 @@ dir.create("cache", FALSE) # Temporary files
 
 # Table of coefficients from test [t1, t2, t3, t4]
 tbl_coef <- function(
-    data = dat_fit,
-    test = NULL,
-    cols = sex, # sex [t1-3] | hypothesis [t4]
-    p = p.value.nonsup # one-sided or p.value for t4
-    ) {
+  data = dat_fit,
+  test = NULL,
+  cols = sex, # sex [t1-3] | hypothesis [t4]
+  p = p.value.nonsup # one-sided or p.value for t4
+) {
   data |>
     select(group, {{ test }}) |>
     unnest({{ test }}) |>
@@ -779,7 +779,7 @@ When adjusting for *C*~criminal~ (Test 3), the results were qualitatively simila
 
 Finally, we tested the regression coefficient for *C*~infected~ against that of *C*~criminal~ and sex (@fig-coef; purple & yellow; For details, see @tbl-t4.) *C*~criminal~ predicted prejudice toward obese individuals more negatively than *C*~infected~, but the difference was not statistically significant for the other three groups. On the other hand, the prejudice sex difference was significantly more positive than the coefficient for *C*~infected~ (recall we coded Woman: -0.5 and Man: 0.5, so men reported greater prejudice).
 
-Overall, then, across the four target groups and four analyses, we found at best weak evidence hypothesis 1.
+Overall, then, across the four target groups and four analyses, we found at best weak evidence for hypothesis 1.
 
 ## Hypotheses 2, 3, and 4
 
@@ -1077,7 +1077,7 @@ Above, we denote prejudice as P, sex (woman: -0.5, man: 0.5) as S, and *C*~infec
 #| label: fit-glmm
 
 library(brms)
-# library(cmdstanr)
+library(cmdstanr)
 
 # Model estimation options, customize in .Renviron
 dir.create("cache", FALSE)
@@ -1266,7 +1266,7 @@ x <- fits_coef |>
 x <- setNames(x, pull(fits_coef |> filter(Star == "*"), Group))
 ```
 
-Second, the filled points and intervals show the partially pooled estimates of $\gamma_1$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). Partial pooling has shrunk the most estimates toward their mean and subsequently provided more accurate estimates that avoid overfitting. Neither the average relation nor the group-specific relations were credibly different from zero at the 95% confidence level.
+Second, the filled points and intervals show the partially pooled estimates of $\gamma_1 + \beta_2$ in visual comparison to their fixed effects counterparts from our main analysis (empty circles; @fig-bf). Partial pooling shrunk the estimates toward their mean and subsequently provided more accurate estimates that avoid overfitting. Neither the average relation nor the group-specific relations were credibly different from zero at the 95% confidence level.
 
 Third, the right panel of @fig-bf shows the evidence ratio between H0: $\beta_2 = 0$ and HA: $\beta_2 \neq 0$. Across the prior distributions that we considered, the evidence for the null hypothesis ranged from weak to very strong. We note that our approximations of the evidence ratio are necessarily tentative because the prior distribution for $\beta_2$ is underdetermined by current theory but nevertheless take them to indicate moderate evidence against the smoke detector perspective of the relation between pathogen detection and prejudice.
 
