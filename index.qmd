@@ -1,6 +1,48 @@
 ---
 title: "The smoke-detector principle of pathogen avoidance: A test of how the behavioral immune system gives rise to prejudice"
-subtitle: "Results & supplementary analyses"
+subtitle: "Supplementary Materials B"
+freeze: auto
+format:
+  # html:
+  #   code-fold: true
+  #   toc: true
+  #   fontsize: 12pt
+  #   mainfont: Fira Sans
+  #   other-links:
+  #     - text: Online supplement
+  #       href: https://mvuorre.github.io/canonical-crab
+  #       icon: globe2
+  #     - text: GitHub Repository
+  #       href: https://github.com/mvuorre/canonical-crab
+  #       icon: github
+  docx:
+    output-file: supplement-b.docx
+
+authors:
+  - name: Matti Vuorre
+    email: mjvuorre@uvt.nl
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    affiliation:
+      - ref: 1
+    corresponding: yes
+  - name: Florian van Leeuwen
+  - name: Bastian Jaeger
+  - name: John Axelsson
+  - name: D. Vaughn Becker
+  - name: Lina S. Hansson
+  - name: Julie Lasselin
+  - name: Mats Lekander
+  - name: Joshua M. Tybur
+affiliations:
+  - id: 1
+    name: Tilburg University
+bibliography: bibliography.bib
+crossref:
+  fig-title: Figure S
+  tbl-title: Table S
+  fig-prefix: Figure S
+  tbl-prefix: Table S
 ---
 
 ```{r}
@@ -129,7 +171,7 @@ tbl_coef <- function(
     select(-any_of("crit_sick")) |>
     .tt(
       notes = list(
-        "Numbers indicate point estimate (SE) [95% CI]"
+        "Numbers indicate point estimate [95% CI]"
       )
     ) |>
     group_tt(
@@ -506,7 +548,7 @@ dat |>
 
 ## Hypothesis 1
 
-We then tested our main hypothesis, H1, that people with a liberal infectious disease decision criterion---a tendency to respond "sick"---would report greater prejudice toward people with obesity, elderly people, people with a physical disability, and people with a facial disfigurement. To test H1, we regressed prejudice scores for these groups (in separate models) on *C*~infected~. We included sex (coded as woman: -0.5, man: 0.5) as a covariate to reduce residual variance. We also tested models that included the interaction effect between sex and *C*~infected~. The interaction was not significant in any of the four models, and therefore in @fig-coef (and @tbl-t1) we only report the common coefficient for these groups. We visualize all bivariate relations in @fig-scatter and report the key regression parameters in the first four rows of @fig-coef (left; red; see also @tbl-t1). Of the four key target groups, *C*~infected~ had a statistically significant negative relation only with prejudice toward individuals with a facial disfigurement (@fig-coef, Test 1).
+We then tested our main hypothesis, H1, that people with a liberal infectious disease decision criterion---a tendency to respond "sick"---would report greater prejudice toward people with obesity, elderly people, people with a physical disability, and people with a facial disfigurement. To test H1, we regressed prejudice scores for these groups (in separate models) on *C*~infected~. We included sex (coded as woman: -0.5, man: 0.5) as a covariate to reduce residual variance. We visualize all bivariate relations in @fig-scatter and report the key regression parameters in the first four rows of @fig-coef (Test 1, see also @tbl-t1). We also tested models that included the interaction effect between sex and *C*~infected~. The interaction was not significant in any of the four models, and therefore in @fig-coef (and @tbl-t1) we only report the common coefficient for these groups. Of the four key target groups, *C*~infected~ had a statistically significant negative relation only with prejudice toward individuals with a facial disfigurement (@fig-coef, Test 1).
 
 ```{r}
 #| label: fig-scatter
@@ -663,10 +705,11 @@ dat_fit <- dat_fit |>
 
 ```{r}
 #| label: fig-coef
-#| fig-cap: "Regression coefficients of C~infected~ relevant to tests 1 (adjusted for Sex) and 2 (excluding individuals self-identifying with the target group), and tests 3 (adjusted for C~criminal~ and Sex) and 4 (C~criminal~ and Sex coefficients)."
-#| fig-height: 3.8
+#| fig-cap: "**Row 1.** Regression coefficients of prejudice on C~infected~ relevant to tests 1 (adjusted for Sex) and 2 (excluding individuals self-identifying with the target group). **Row 2.** Regression coefficients relevant to tests 3 (prejudice on C~infected~ adjusted for C~criminal~ and Sex) and 4 (comparing C~criminal~ to C~infected~ and Sex). Note: C~infected~ (black) is identical in the two panels to facilitate visual comparison to C~criminal~ (left) and Sex (right)."
+#| fig-height: 5
 
-tmp <- dat_fit |>
+# Wrangle coefficients across different tests to a common format
+dat_coef <- dat_fit |>
   left_join(groups) |>
   mutate(group = fct_inorder(label) |> fct_rev()) |>
   select(group, c(t1, t2, t4)) |>
@@ -675,16 +718,13 @@ tmp <- dat_fit |>
   mutate(term = coalesce(term, hypothesis)) |>
   filter(!str_detect(term, " - ")) |>
   mutate(
+    # Test 4 is non-directional, combine to single variable for plotting
     p.value = coalesce(p.value.nonsup, p.value),
+    # sex=NA indicates both sexes
     sex = fct_na_value_to_level(sex, "Both"),
     sig = p.value <= 0.05,
-    shape = interaction(sig, sex),
     test = str_remove(test, "t"),
-    panel = if_else(test == "4", "Contrast", "Slope") |>
-      factor(
-        levels = c("Slope", "Contrast"),
-        labels = c("Tests 1 & 2", "Tests 3 & 4")
-      ),
+    # Give coefficients informative labels
     Coefficient = str_glue("{term} (Test {test})") |>
       factor(
         levels = c(
@@ -702,25 +742,14 @@ tmp <- dat_fit |>
           "Sex (Test 4)"
         )
       )
-  ) |>
-  select(
-    group,
-    panel,
-    test,
-    term,
-    Coefficient,
-    sex,
-    estimate:conf.high,
-    sig,
-    shape
   )
 
-tmp |>
+p_coef_1 <- dat_coef |>
+  filter(test %in% c(1, 2)) |>
   ggplot(
     aes(
       x = estimate,
       y = group,
-      color = Coefficient,
       shape = sex
     )
   ) +
@@ -737,9 +766,9 @@ tmp |>
       "Man" = "triangle"
     )
   ) +
-  scale_color_brewer(
+  scale_color_manual(
     "Coefficient",
-    palette = "Set1"
+    values = c("black", RColorBrewer::brewer.pal(3, "Set1")[1:2])
   ) +
   geom_vline(
     xintercept = 0,
@@ -751,19 +780,19 @@ tmp |>
       xmin = conf.low,
       xmax = conf.high
     ),
-    linewidth = .5,
-    fatten = 3,
-    position = position_dodge2(width = .7, reverse = TRUE),
+    linewidth = .25,
+    fatten = 2,
+    position = position_dodge2(width = .8, reverse = TRUE),
     key_glyph = "point"
   ) +
   guides(
-    shape = guide_legend(override.aes = list(size = 2)),
-    color = guide_legend(override.aes = list(size = 2))
+    shape = guide_legend(override.aes = list(size = 1.5)),
+    color = guide_legend(override.aes = list(size = 1.5))
   ) +
-  facet_manual(
-    "panel",
-    design = "AAABB",
-    scales = "free_x"
+  facet_wrap(
+    "test",
+    labeller = as_labeller(~ str_c("Test ", .x)),
+    scales = "fixed"
   ) +
   theme(
     axis.title.y = element_blank(),
@@ -771,13 +800,40 @@ tmp |>
     legend.text = element_markdown(),
     plot.margin = unit(c(8, 10, 8, 8), "pt")
   )
+
+# Data for panels showing Cinfected with Csick and Sex
+dat_coef_2 <- bind_rows(
+  filter(dat_coef, test == 4) |>
+    filter(term %in% c("crit_sick", "crit_criminal")) |>
+    mutate(panel = "C~infected~ vs C~criminal~"),
+  filter(dat_coef, test == 4) |>
+    filter(term %in% c("crit_sick", "sex")) |>
+    mutate(panel = "C~infected~ vs Sex")
+)
+
+p_coef_2 <- p_coef_1 %+%
+  dat_coef_2 +
+  aes(color = Coefficient) +
+  guides(
+    shape = "none"
+  ) +
+  facet_wrap(
+    "panel",
+    scales = "fixed"
+  )
+
+(p_coef_1 / p_coef_2) +
+  plot_layout(
+    axis_titles = "collect",
+    heights = c(4.5, 5.5)
+  )
 ```
 
-Following the protocol, we then examined the regression coefficients in models that excluded participants who identified with the target group (Test 2); adjusted for *C*~criminal~ (Test 3); and compared *C*~infected~ with *C*~criminal~ and the sex coefficient (Test 4). Coefficients from models that excluded participants who identified with the target group are shown in blue in @fig-coef (Test 2). For details, see @tbl-t2. Results did not differ from those of the main analysis.
+Following the protocol, we then examined the regression coefficients in models that excluded participants who identified with the target group (Test 2); adjusted for *C*~criminal~ (Test 3); and compared *C*~infected~ with *C*~criminal~ and the sex coefficient (Test 4). Coefficients from models that excluded participants who identified with the target group are shown in @fig-coef (Test 2). For details, see @tbl-t2. Results did not differ from those of the main analysis.
 
-When adjusting for *C*~criminal~ (Test 3), the results were qualitatively similar, with the key difference that the relationship between *C*~infected~ and prejudice toward individuals with a facial disfigurement was no longer statistically significant (@fig-coef; green). For details, see @tbl-t3.
+When adjusting for *C*~criminal~ (@fig-coef, Test 3), the results were qualitatively similar, with the key difference that the relationship between *C*~infected~ and prejudice toward individuals with a facial disfigurement was no longer statistically significant. For details, see @tbl-t3.
 
-Finally, we tested the regression coefficient for *C*~infected~ against that of *C*~criminal~ and sex (@fig-coef; purple & yellow; For details, see @tbl-t4.) *C*~criminal~ predicted prejudice toward obese individuals more negatively than *C*~infected~, but the difference was not statistically significant for the other three groups. On the other hand, the prejudice sex difference was significantly more positive than the coefficient for *C*~infected~ (recall we coded Woman: -0.5 and Man: 0.5, so men reported greater prejudice).
+Finally, we tested the regression coefficient for *C*~infected~ against that of *C*~criminal~ and sex (@fig-coef, Test 4; for details, see @tbl-t4.) *C*~infected~ was not a stronger predictor of prejudice than either *C*~criminal~ or participant sex (recall we coded Woman: -0.5 and Man: 0.5, so positive coefficients of Sex indicate that men reported greater prejudice).
 
 Overall, then, across the four target groups and four analyses, we found at best weak evidence for hypothesis 1.
 
@@ -1126,7 +1182,8 @@ fits <- tibble(
       file = str_glue("cache/brm-phi-{.y}"),
       control = list(adapt_delta = 0.995),
       file_refit = "never",
-      sample_prior = "yes"
+      sample_prior = "yes",
+      save_pars = save_pars(group = "target")
     )
   )
 )

@@ -1,18 +1,3 @@
----
-title: 'The smoke-detector principle of pathogen avoidance: A test of how the behavioral immune system gives rise to prejudice'
-subtitle: Supplementary analyses
-execute:
-  cache: true
-format:
-  html:
-    toc: true
-    code-fold: true
-    self-contained: true
-  docx:
-    number-sections: false
-    fig-align: center
-    dpi: 220
----
 
 ```{r}
 #| label: setup-supp
@@ -87,12 +72,11 @@ We first define a function that simulates data from this multivariate normal dis
 ```{r}
 # Functions to simulate data and calculate coefficient p-value
 simulate <- function(
-    n = 30,
-    cor_prejudice_sex = 0,
-    cor_prejudice_criterion = 0,
-    cor_sex_criterion = 0
+  n = 30,
+  cor_prejudice_sex = 0,
+  cor_prejudice_criterion = 0,
+  cor_sex_criterion = 0
 ) {
-
   # Simulate from multivariate normal distribution
   latent <- rnorm_multi(
     n = n,
@@ -140,11 +124,11 @@ if (!file.exists(path)) {
     mutate(
       simulation = future_pmap_dbl(
         list(n, cor_prejudice_sex, cor_prejudice_criterion, cor_sex_criterion),
-        ~simulate(
-          n=..1,
-          cor_prejudice_sex=..2,
-          cor_prejudice_criterion=..3,
-          cor_sex_criterion=..4
+        ~ simulate(
+          n = ..1,
+          cor_prejudice_sex = ..2,
+          cor_prejudice_criterion = ..3,
+          cor_sex_criterion = ..4
         )
       )
     )
@@ -154,7 +138,9 @@ if (!file.exists(path)) {
       .by = c(n, cor_prejudice_sex, cor_prejudice_criterion, cor_sex_criterion)
     )
   saveRDS(sim, path)
-} else {sim <- readRDS(path)}
+} else {
+  sim <- readRDS(path)
+}
 ```
 
 Calculate simple power
@@ -163,8 +149,9 @@ Calculate simple power
 sim <- sim |>
   mutate(
     calculation = map2_dbl(
-      n, cor_prejudice_criterion,
-      ~pwr.r.test(n=..1, r=..2, alternative = "greater")$power
+      n,
+      cor_prejudice_criterion,
+      ~ pwr.r.test(n = ..1, r = ..2, alternative = "greater")$power
     )
   )
 ```
@@ -190,14 +177,15 @@ sim |>
   ) +
   scale_y_continuous(
     "Power",
-    labels = ~percent(.)
+    labels = ~ percent(.)
   ) +
   scale_x_continuous(
     "Number of participants",
     breaks = extended_breaks()
   ) +
   geom_hline(
-    yintercept = 0.9, linewidth = 0.1
+    yintercept = 0.9,
+    linewidth = 0.1
   ) +
   geom_line() +
   facet_grid(
