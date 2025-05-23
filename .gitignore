@@ -9,12 +9,10 @@
 /.quarto/
 /*cache/
 /index_*/
-/manuscript/
 *.pdf
 *.html
 *.docx
 /data-raw/
-/data/
 /docs/
 /tinytable_assets/
 /_freeze/

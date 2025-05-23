@@ -3,18 +3,6 @@ title: "The smoke-detector principle of pathogen avoidance: A test of how the be
 subtitle: "Supplementary Materials B"
 freeze: auto
 format:
-  # html:
-  #   code-fold: true
-  #   toc: true
-  #   fontsize: 12pt
-  #   mainfont: Fira Sans
-  #   other-links:
-  #     - text: Online supplement
-  #       href: https://mvuorre.github.io/canonical-crab
-  #       icon: globe2
-  #     - text: GitHub Repository
-  #       href: https://github.com/mvuorre/canonical-crab
-  #       icon: github
   docx:
     output-file: supplement-b.docx
 
@@ -192,35 +180,12 @@ tbl_coef <- function(
 #| label: data-wrangle
 #| output: false
 
-# Load data with good names
-# Hack to skip second row but include names
-dat <- read_excel(
-  Sys.getenv("PATH_DATA_RAW"),
-  skip = 2,
-  col_names = names(read_excel(Sys.getenv("PATH_DATA_RAW")))
-) |>
-  clean_names() |>
-  rename(pid = response_id) |>
-  filter(consent == 1, age >= 18) |>
-  select(
-    -c(
-      start_date:recorded_date,
-      distribution_channel,
-      user_language,
-      consent,
-      q50,
-      comments
-    )
-  )
+dat <- read_csv("data/data-raw.csv")
+codebook <- read_excel("data/codebook.xlsx") |>
+  clean_names()
 
 # Use 'sex' consistently
 dat <- rename(dat, sex = gender)
-
-# Write reduced data for sharing
-dir.create("data", FALSE)
-write_csv(dat, "data/data-raw.csv")
-codebook <- read_excel("data/codebook.xlsx") |>
-  clean_names()
 
 # Count exclusions
 # "We will exclude from the analysis participants who
@@ -459,9 +424,6 @@ sexes <- dat |>
   mutate(sex = str_glue("{sex}: {n}")) |>
   pull(sex) |>
   str_to_sentence()
-
-# Save cleaned data
-write_csv(dat, "data/data.csv")
 ```
 
 ## Descriptive results
@@ -1033,6 +995,10 @@ sdt_raw |>
 #| label: fig-sdt-compare
 #| fig-cap: "Comparison of item functioning in current study (red) and a previous study (blue). Top row: Proportions of 'Yes' responses in both conditions and studies. Bottom: Same as above but illustrating the correlation as a scatterplot."
 #| fig-height: 2.6
+#| error: true
+
+# This is not reproducible because we cannot share
+# the stimulus stats from the other publication
 
 brks <- c(0, .25, .5, .75, 1)
 lbls <- c("0", ".25", ".50", ".75", "1")
