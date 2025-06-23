@@ -16,3 +16,5 @@
 /docs/
 /tinytable_assets/
 /_freeze/
+*.knit.md
+*.rmarkdown
