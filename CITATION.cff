@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: Code and data supplement to "The smoke-detector principle of pathogen avoidance"
+version: 1.0.1
+license: CC0-1.0
+type: software
+abstract: Code and data reported in the manuscript.
+authors:
+  - family-names: Vuorre
+    given-names: Matti
+    orcid: https://orcid.org/0000-0001-5052-066X
+    affiliation: Tilburg University
+  - family-names: van Leeuwen
+    given-names: Florian
+    orcid: https://orcid.org/0000-0002-9694-8300
+    affiliation: Tilburg University
+  - family-names: Jaeger
+    given-names: Bastian
+    orcid: https://orcid.org/0000-0002-4398-9731
+    affiliation: Tilburg University
+keywords:
+  - psychology
